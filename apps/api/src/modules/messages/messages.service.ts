@@ -23,6 +23,23 @@ export class MessagesService {
     const id = uuidv4();
     const now = new Date();
 
+    const MAX_SCHEDULE_MS = 30 * 24 * 3600 * 1000;
+    let delayMs = 0;
+    let scheduledAt: Date | null = null;
+
+    if (dto.sendAt && dto.delaySeconds !== undefined) {
+      throw new BadRequestException('Provide either sendAt or delaySeconds, not both');
+    }
+    if (dto.sendAt) {
+      delayMs = new Date(dto.sendAt).getTime() - now.getTime();
+      if (delayMs <= 0) throw new BadRequestException('sendAt must be in the future');
+      if (delayMs > MAX_SCHEDULE_MS) throw new BadRequestException('sendAt must be within 30 days');
+      scheduledAt = new Date(dto.sendAt);
+    } else if (dto.delaySeconds) {
+      delayMs = dto.delaySeconds * 1000;
+      scheduledAt = new Date(now.getTime() + delayMs);
+    }
+
     let body = dto.message!;
     let subject = dto.subject ?? null;
 
@@ -48,10 +65,11 @@ export class MessagesService {
         to: dto.to,
         subject,
         body,
-        status: 'queued',
+        status: scheduledAt ? 'scheduled' : 'queued',
         apiKeyId: apiKeyId ?? null,
         templateId: dto.templateId ?? null,
-        queuedAt: now,
+        scheduledAt,
+        queuedAt: scheduledAt ? null : now,
       }),
     );
 
@@ -69,9 +87,12 @@ export class MessagesService {
       backoff: { type: 'exponential', delay: 5000 },
       removeOnComplete: { count: 1000 },
       removeOnFail: false,
+      ...(delayMs > 0 && { delay: delayMs }),
     });
 
-    return { id, status: 'queued' as const };
+    return scheduledAt
+      ? { id, status: 'scheduled' as const, scheduledAt }
+      : { id, status: 'queued' as const };
   }
 
   async list(query: { limit: number; offset: number; status?: string; channel?: string }) {
@@ -115,6 +136,7 @@ export class MessagesService {
       to: msg.to,
       status: msg.status,
       createdAt: msg.createdAt,
+      scheduledAt: msg.scheduledAt,
       queuedAt: msg.queuedAt,
       processingAt: msg.processingAt,
       sentAt: msg.sentAt,

@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty, IsObject, IsOptional, IsString, IsUUID, ValidateIf } from 'class-validator';
+import { IsEnum, IsInt, IsISO8601, IsNotEmpty, IsObject, IsOptional, IsString, IsUUID, Max, Min, ValidateIf } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { MessageChannel } from '@communication/types';
 
@@ -35,4 +35,22 @@ export class SendMessageDto {
   @IsOptional()
   @IsObject()
   variables?: Record<string, string>;
+
+  @ApiPropertyOptional({
+    example: '2026-06-15T09:00:00+03:00',
+    description: 'Schedule delivery at a specific datetime (ISO 8601, max 30 days ahead)',
+  })
+  @IsOptional()
+  @IsISO8601()
+  sendAt?: string;
+
+  @ApiPropertyOptional({
+    example: 1800,
+    description: 'Delay delivery by this many seconds (max 30 days)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(30 * 24 * 3600)
+  delaySeconds?: number;
 }

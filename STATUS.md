@@ -38,6 +38,7 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 | DLQ | `GET /dlq`, `POST /dlq/:channel/:jobId/retry`, `POST /dlq/:channel/retry-all`, `DELETE /dlq/:channel/:jobId` (JWT); dashboard panel with retry/discard buttons (appears when jobs are failed) |
 | WhatsApp QR in dashboard | Worker publishes QR to Redis (`whatsapp:qr`, 60s TTL, cleared on connect); `GET /api/v1/providers/whatsapp/qr` (JWT-only); dashboard shows a scan-to-link panel whenever a QR is pending |
 | Templates (Phase 2) | `templates` table + CRUD at `/api/v1/templates` (API key or JWT); send accepts `templateId` + `variables`, renders `{{placeholders}}` server-side (strict — missing variables → 400), stores rendered body + `template_id` on the message row |
+| Scheduled/delayed (Phase 2) | Send accepts `sendAt` (ISO datetime) or `delaySeconds` (mutually exclusive, max 30 days) → BullMQ `delay`; new `scheduled` status + `scheduled_at` column; status flips to processing/sent when the job fires; purple badge in dashboard |
 | Swagger | http://localhost:3001/api |
 | Env | `.env` files present at root, `apps/api`, `apps/worker` (SMTP + WhatsApp configured) |
 
@@ -82,12 +83,13 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 - Basel pushed `main` to GitHub (both pending commits) from VSCode.
 - Killed the stale duplicate worker from yesterday (pid 1305108, old build) — only the `pnpm dev` worker remains, running the QR-publishing build. WhatsApp status: `connected`, no QR pending (correct).
 - **Phase 2 kickoff — message templates shipped**: `Template` entity + `CreateTemplates` migration (also adds `messages.template_id`), `TemplatesModule` with full CRUD at `/api/v1/templates` (ApiKeyOrJwtGuard, 409 on duplicate names), send endpoint now takes `templateId` + `variables` and renders `{{placeholders}}` server-side before persisting/queueing (worker untouched — it only ever sees rendered text). Strict rendering: any placeholder without a value → 400 listing the missing keys; channel mismatch and message+templateId both → 400. Verified live end-to-end: created `order-confirmation` template, sent a real templated email to basel51@gmail.com (status `sent`, rendered subject/body + `template_id` confirmed in DB), all error paths, PATCH/DELETE/409/401. Test API key from seeding deactivated afterwards.
+- **Scheduled + delayed messages shipped**: `sendAt` (ISO 8601) or `delaySeconds` on the send endpoint (mutually exclusive; both capped at 30 days; past `sendAt` → 400) map to BullMQ's `delay` option. New `scheduled` message status (`@communication/types` union extended) + `scheduled_at` column (`AddScheduledAt` migration); response returns `{status:"scheduled", scheduledAt}`. Dashboard shows scheduled messages with a purple badge. Verified live: 15s-delayed templated email — status `scheduled` immediately, worker picked it up 150ms after the scheduled time, `sent` confirmed; all three 400 paths tested. Also removed stale build artifacts (`index.js`/`index.d.ts`) from `packages/types/src/` that would have shadowed type changes.
 
 ---
 
 ## Next up (priority order)
 
-1. Push the templates commit to GitHub (terminal push still blocked — push from VSCode, or register `~/.ssh/id_ed25519_github.pub` with GitHub and `git remote set-url origin git@github.com:basil51/communicat.git`).
-2. Phase 2 continued: scheduled messages (send at datetime) + delayed messages — BullMQ `delay` option makes this cheap.
-3. Phase 2: bulk messaging (list of recipients in one call) and webhooks (delivery status callbacks).
+1. Push the templates + scheduling commits to GitHub (terminal push still blocked — push from VSCode, or register `~/.ssh/id_ed25519_github.pub` with GitHub and `git remote set-url origin git@github.com:basil51/communicat.git`).
+2. Phase 2: bulk messaging (list of recipients in one call).
+3. Phase 2: webhooks (delivery status callbacks on sent/failed).
 4. Dashboard: template management UI; pagination/filters for the messages table.

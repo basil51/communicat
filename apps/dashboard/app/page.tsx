@@ -56,6 +56,7 @@ const REFRESH_MS = 10_000;
 const statusColors: Record<string, string> = {
   sent: 'bg-green-100 text-green-700',
   delivered: 'bg-green-100 text-green-700',
+  scheduled: 'bg-purple-100 text-purple-700',
   queued: 'bg-yellow-100 text-yellow-700',
   processing: 'bg-blue-100 text-blue-700',
   failed: 'bg-red-100 text-red-700',

@@ -1,6 +1,6 @@
 export type MessageChannel = 'email' | 'whatsapp';
 
-export type MessageStatus = 'queued' | 'processing' | 'sent' | 'failed' | 'delivered';
+export type MessageStatus = 'scheduled' | 'queued' | 'processing' | 'sent' | 'failed' | 'delivered';
 
 export interface SendMessagePayload {
   channel: MessageChannel;

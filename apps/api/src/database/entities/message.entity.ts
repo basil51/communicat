@@ -41,6 +41,9 @@ export class Message {
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 
+  @Column({ name: 'scheduled_at', nullable: true, type: 'timestamptz' })
+  scheduledAt: Date | null;
+
   @Column({ name: 'queued_at', nullable: true, type: 'timestamptz' })
   queuedAt: Date | null;
 
