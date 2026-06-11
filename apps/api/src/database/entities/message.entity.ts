@@ -31,6 +31,10 @@ export class Message {
   @Column({ name: 'template_id', nullable: true, type: 'varchar' })
   templateId: string | null;
 
+  @Index()
+  @Column({ name: 'batch_id', nullable: true, type: 'varchar' })
+  batchId: string | null;
+
   @Column({ name: 'retry_count', default: 0 })
   retryCount: number;
 

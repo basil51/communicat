@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { MessageChannel, MessageStatus } from '@communication/types';
@@ -19,13 +19,18 @@ export class ListMessagesDto {
   @Min(0)
   offset: number = 0;
 
-  @ApiPropertyOptional({ enum: ['queued', 'processing', 'sent', 'failed', 'delivered'] })
+  @ApiPropertyOptional({ enum: ['scheduled', 'queued', 'processing', 'sent', 'failed', 'delivered'] })
   @IsOptional()
-  @IsIn(['queued', 'processing', 'sent', 'failed', 'delivered'])
+  @IsIn(['scheduled', 'queued', 'processing', 'sent', 'failed', 'delivered'])
   status?: MessageStatus;
 
   @ApiPropertyOptional({ enum: ['email', 'whatsapp'] })
   @IsOptional()
   @IsIn(['email', 'whatsapp'])
   channel?: MessageChannel;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Filter to a single bulk-send batch' })
+  @IsOptional()
+  @IsUUID()
+  batchId?: string;
 }
