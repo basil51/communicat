@@ -39,13 +39,16 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 | WhatsApp QR in dashboard | Worker publishes QR to Redis (`whatsapp:qr`, 60s TTL, cleared on connect); `GET /api/v1/providers/whatsapp/qr` (JWT-only); dashboard shows a scan-to-link panel whenever a QR is pending |
 | Templates (Phase 2) | `templates` table + CRUD at `/api/v1/templates` (API key or JWT); send accepts `templateId` + `variables`, renders `{{placeholders}}` server-side (strict — missing variables → 400), stores rendered body + `template_id` on the message row |
 | Scheduled/delayed (Phase 2) | Send accepts `sendAt` (ISO datetime) or `delaySeconds` (mutually exclusive, max 30 days) → BullMQ `delay`; new `scheduled` status + `scheduled_at` column; status flips to processing/sent when the job fires; purple badge in dashboard |
+| Bulk messaging (Phase 2) | `POST /api/v1/messages/send-bulk` — up to 100 recipients, per-recipient template variables, all rendered before anything persists (one bad recipient → 400, nothing queued); shared `batch_id` (indexed), `GET /messages?batchId=` filter; 10 calls/min |
+| Webhooks (Phase 2) | `webhooks` table + CRUD at `/api/v1/webhooks` (API key or JWT); worker dispatches `message.sent`/`message.failed` through a `webhooks` BullMQ queue — one delivery job per subscribed endpoint, HMAC-SHA256 signed (`X-Webhook-Signature: sha256=…` with the `whsec_…` secret), 10s timeout, 3 retries, failures land in the DLQ (third channel in `/dlq` + dashboard) |
 | Swagger | http://localhost:3001/api |
 | Env | `.env` files present at root, `apps/api`, `apps/worker` (SMTP + WhatsApp configured) |
 
 ### In progress / known gaps 🔧
 
 - **WhatsApp status bridge** — `ProvidersService.getWhatsAppStatus()` reads the `whatsapp:status` key from Redis, but the worker never writes it, so the endpoint always reports `unknown`. *(Being fixed today.)*
-- **Dashboard** — v1 + DLQ panel + WhatsApp QR done. Still missing: pagination/filters UI, template management UI.
+- **Dashboard** — v1 + DLQ panel + WhatsApp QR done. Still missing: pagination/filters UI, template/webhook management UI.
+- **Stray worker processes on `pnpm dev`** — `nest start --watch` (worker) spawns `node dist/main` via `sh -c` and orphans the old process on some restarts; duplicates then compete for queue jobs and the WhatsApp session. Happened 2026-06-11 and again today (4 strays). Workaround: `pkill -f 'worker/dist/main'` then let watch respawn. Real fix: investigate `--watch` restart behavior or add a dev script that kills strays first.
 - **Don't run `pnpm build` while `pnpm dev` is running** — `next build` clobbers the dev server's `.next` dir and breaks it until restart. Build only api/worker (`pnpm --filter @communication/api build`) when the stack is up.
 - **Duplicate Message entity** — `apps/worker/src/database/entities/message.entity.ts` is a copy of the API's; should move to `packages/shared` eventually.
 - **Per-key rate limits** — Roadmap calls for configurable limits *per API key*; current throttling is global/per-route.
@@ -83,13 +86,18 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 - Basel pushed `main` to GitHub (both pending commits) from VSCode.
 - Killed the stale duplicate worker from yesterday (pid 1305108, old build) — only the `pnpm dev` worker remains, running the QR-publishing build. WhatsApp status: `connected`, no QR pending (correct).
 - **Phase 2 kickoff — message templates shipped**: `Template` entity + `CreateTemplates` migration (also adds `messages.template_id`), `TemplatesModule` with full CRUD at `/api/v1/templates` (ApiKeyOrJwtGuard, 409 on duplicate names), send endpoint now takes `templateId` + `variables` and renders `{{placeholders}}` server-side before persisting/queueing (worker untouched — it only ever sees rendered text). Strict rendering: any placeholder without a value → 400 listing the missing keys; channel mismatch and message+templateId both → 400. Verified live end-to-end: created `order-confirmation` template, sent a real templated email to basel51@gmail.com (status `sent`, rendered subject/body + `template_id` confirmed in DB), all error paths, PATCH/DELETE/409/401. Test API key from seeding deactivated afterwards.
+- **Bulk messaging shipped**: `POST /messages/send-bulk` (max 100 recipients, per-recipient variables merged over shared ones, combinable with templates + scheduling). Atomic validation: everything renders before anything persists. Batch grouped by indexed `batch_id` (`AddBatchId` migration), filterable via `GET /messages?batchId=`. Verified live: 2-recipient templated batch → both rendered per-recipient and `sent`; bad recipient → 400 naming it, zero rows queued.
+- **Webhooks shipped**: `webhooks` table (`CreateWebhooks` migration) + CRUD; secret (`whsec_…`) generated server-side. Worker-side `WebhookDispatcherService` fans `message.sent`/`message.failed` out into per-endpoint delivery jobs on a new `webhooks` queue; `WebhookProcessor` POSTs JSON with `X-Webhook-Event` + `X-Webhook-Signature: sha256=<HMAC-SHA256 of body>`, 10s timeout, 3 attempts; webhook problems never fail the message job. DLQ extended to a third `webhooks` channel (API + dashboard; retry skips message-status updates). Verified live: local receiver got `message.sent` with a **valid HMAC**, dead-endpoint delivery retried 3× → DLQ → discarded. Test webhooks/key cleaned up.
+- **Recurring stray-worker problem hit again**: `nest start --watch` leaves orphaned `node dist/main` worker processes behind on restarts (found 4 strays competing for queue jobs — an old one swallowed the first webhook test). Killed them; see gaps.
 - **Scheduled + delayed messages shipped**: `sendAt` (ISO 8601) or `delaySeconds` on the send endpoint (mutually exclusive; both capped at 30 days; past `sendAt` → 400) map to BullMQ's `delay` option. New `scheduled` message status (`@communication/types` union extended) + `scheduled_at` column (`AddScheduledAt` migration); response returns `{status:"scheduled", scheduledAt}`. Dashboard shows scheduled messages with a purple badge. Verified live: 15s-delayed templated email — status `scheduled` immediately, worker picked it up 150ms after the scheduled time, `sent` confirmed; all three 400 paths tested. Also removed stale build artifacts (`index.js`/`index.d.ts`) from `packages/types/src/` that would have shadowed type changes.
 
 ---
 
 ## Next up (priority order)
 
-1. Push the templates + scheduling commits to GitHub (terminal push still blocked — push from VSCode, or register `~/.ssh/id_ed25519_github.pub` with GitHub and `git remote set-url origin git@github.com:basil51/communicat.git`).
-2. Phase 2: bulk messaging (list of recipients in one call).
-3. Phase 2: webhooks (delivery status callbacks on sent/failed).
-4. Dashboard: template management UI; pagination/filters for the messages table.
+**Phase 2 is feature-complete** (templates, scheduled/delayed, bulk, webhooks).
+
+1. Push the 4 unpushed commits to GitHub (terminal push still blocked — push from VSCode, or register `~/.ssh/id_ed25519_github.pub` with GitHub and `git remote set-url origin git@github.com:basil51/communicat.git`).
+2. Fix the stray-worker problem in `pnpm dev` (see gaps) — it has now bitten twice.
+3. Dashboard: template/webhook management UI; pagination/filters for the messages table.
+4. Per-key rate limits (Phase 1 leftover), then Phase 3 kickoff: multi-tenant (tenants table, scoped API keys, row-level isolation on the existing `tenant_id` columns).

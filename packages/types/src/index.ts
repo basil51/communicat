@@ -28,7 +28,27 @@ export interface MessageStatusResult extends MessageResult {
   errorMessage?: string;
 }
 
+export type WebhookEvent = 'message.sent' | 'message.failed';
+
+export interface WebhookEventPayload {
+  messageId: string;
+  channel: MessageChannel;
+  to: string;
+  status: MessageStatus;
+  errorMessage?: string;
+  timestamp: string;
+}
+
+export interface WebhookDeliveryJobData {
+  webhookId: string;
+  url: string;
+  secret: string;
+  event: WebhookEvent;
+  payload: WebhookEventPayload;
+}
+
 export const QUEUE_NAMES = {
   EMAIL: 'email',
   WHATSAPP: 'whatsapp',
+  WEBHOOKS: 'webhooks',
 } as const;

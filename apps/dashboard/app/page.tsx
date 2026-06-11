@@ -49,6 +49,7 @@ interface FailedJob {
 interface DlqList {
   email: FailedJob[];
   whatsapp: FailedJob[];
+  webhooks: FailedJob[];
 }
 
 const REFRESH_MS = 10_000;
@@ -117,7 +118,7 @@ export default function DashboardPage() {
     }
   }
 
-  const failedJobs = dlq ? [...dlq.email, ...dlq.whatsapp] : [];
+  const failedJobs = dlq ? [...dlq.email, ...dlq.whatsapp, ...(dlq.webhooks ?? [])] : [];
 
   return (
     <main className="min-h-screen bg-gray-50 p-6">
@@ -202,6 +203,14 @@ export default function DashboardPage() {
                     className="rounded-md bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
                   >
                     Retry all WhatsApp
+                  </button>
+                )}
+                {(dlq!.webhooks?.length ?? 0) > 0 && (
+                  <button
+                    onClick={() => dlqAction('/dlq/webhooks/retry-all')}
+                    className="rounded-md bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
+                  >
+                    Retry all webhooks
                   </button>
                 )}
               </div>

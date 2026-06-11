@@ -6,6 +6,7 @@ import { Job } from 'bullmq';
 import { QUEUE_NAMES, MessageJobData } from '@communication/types';
 import { Message } from '../database/entities/message.entity';
 import { EmailService } from '../services/email.service';
+import { WebhookDispatcherService } from '../services/webhook-dispatcher.service';
 
 @Processor(QUEUE_NAMES.EMAIL)
 export class EmailProcessor extends WorkerHost {
@@ -15,6 +16,7 @@ export class EmailProcessor extends WorkerHost {
     @InjectRepository(Message)
     private readonly messageRepo: Repository<Message>,
     private readonly emailService: EmailService,
+    private readonly webhooks: WebhookDispatcherService,
   ) {
     super();
   }
@@ -28,13 +30,18 @@ export class EmailProcessor extends WorkerHost {
     try {
       await this.emailService.send(to, subject ?? null, message);
       await this.messageRepo.update(messageId, { status: 'sent', sentAt: new Date() });
+      await this.webhooks.dispatch('message.sent', { messageId, channel: 'email', to, status: 'sent' });
     } catch (err: any) {
       const isLastAttempt = job.attemptsMade >= (job.opts.attempts ?? 1) - 1;
+      const errorMessage = err?.message ?? String(err);
       await this.messageRepo.update(messageId, {
         status: isLastAttempt ? 'failed' : 'queued',
         retryCount: job.attemptsMade,
-        ...(isLastAttempt && { failedAt: new Date(), errorMessage: err?.message ?? String(err) }),
+        ...(isLastAttempt && { failedAt: new Date(), errorMessage }),
       });
+      if (isLastAttempt) {
+        await this.webhooks.dispatch('message.failed', { messageId, channel: 'email', to, status: 'failed', errorMessage });
+      }
       throw err;
     }
   }

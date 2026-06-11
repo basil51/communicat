@@ -10,7 +10,11 @@ import { DlqController } from './dlq.controller';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Message]),
-    BullModule.registerQueue({ name: QUEUE_NAMES.EMAIL }, { name: QUEUE_NAMES.WHATSAPP }),
+    BullModule.registerQueue(
+      { name: QUEUE_NAMES.EMAIL },
+      { name: QUEUE_NAMES.WHATSAPP },
+      { name: QUEUE_NAMES.WEBHOOKS },
+    ),
     AuthModule,
   ],
   providers: [DlqService],
