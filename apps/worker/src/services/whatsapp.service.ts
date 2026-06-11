@@ -11,6 +11,9 @@ export type WhatsAppStatus = 'disconnected' | 'qr_required' | 'connected';
 const STATUS_KEY = 'whatsapp:status';
 const STATUS_TTL_SECONDS = 90;
 const HEARTBEAT_MS = 30_000;
+const QR_KEY = 'whatsapp:qr';
+// whatsapp-web.js rotates the QR roughly every 30s and re-emits 'qr' each time
+const QR_TTL_SECONDS = 60;
 
 @Injectable()
 export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
@@ -50,6 +53,7 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
 
     this.client.on('qr', (qr) => {
       this.setStatus('qr_required');
+      void this.publishQr(qr);
       this.logger.log('Scan QR code with WhatsApp on your phone:');
       qrcode.generate(qr, { small: true });
     });
@@ -57,18 +61,21 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     this.client.on('ready', () => {
       this.ready = true;
       this.setStatus('connected');
+      void this.clearQr();
       this.logger.log('WhatsApp client ready');
     });
 
     this.client.on('auth_failure', (msg) => {
       this.ready = false;
       this.setStatus('disconnected');
+      void this.clearQr();
       this.logger.error(`WhatsApp auth failed: ${msg}`);
     });
 
     this.client.on('disconnected', (reason) => {
       this.ready = false;
       this.setStatus('disconnected');
+      void this.clearQr();
       this.logger.warn(`WhatsApp disconnected: ${reason}`);
     });
 
@@ -84,7 +91,7 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy() {
     if (this.heartbeat) clearInterval(this.heartbeat);
     const redis = await this.queue.client;
-    await redis.del(STATUS_KEY).catch(() => {});
+    await redis.del(STATUS_KEY, QR_KEY).catch(() => {});
     await this.client?.destroy().catch(() => {});
   }
 
@@ -101,6 +108,25 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
       await redis.set(STATUS_KEY, this.status, { EX: STATUS_TTL_SECONDS });
     } catch (err: any) {
       this.logger.warn(`Failed to publish WhatsApp status to Redis: ${err.message}`);
+    }
+  }
+
+  // The API serves this to the dashboard so linking doesn't require terminal access.
+  private async publishQr(qr: string) {
+    try {
+      const redis = await this.queue.client;
+      await redis.set(QR_KEY, qr, { EX: QR_TTL_SECONDS });
+    } catch (err: any) {
+      this.logger.warn(`Failed to publish WhatsApp QR to Redis: ${err.message}`);
+    }
+  }
+
+  private async clearQr() {
+    try {
+      const redis = await this.queue.client;
+      await redis.del(QR_KEY);
+    } catch (err: any) {
+      this.logger.warn(`Failed to clear WhatsApp QR from Redis: ${err.message}`);
     }
   }
 

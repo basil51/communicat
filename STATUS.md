@@ -36,14 +36,15 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 | Messages list | `GET /api/v1/messages` (JWT, paginated, filter by status/channel, newest first) |
 | Dashboard v1 | Login page + dashboard: provider status cards (SMTP/WhatsApp + queue depths), recent-messages table, 10s auto-refresh, 401 → redirect to login |
 | DLQ | `GET /dlq`, `POST /dlq/:channel/:jobId/retry`, `POST /dlq/:channel/retry-all`, `DELETE /dlq/:channel/:jobId` (JWT); dashboard panel with retry/discard buttons (appears when jobs are failed) |
+| WhatsApp QR in dashboard | Worker publishes QR to Redis (`whatsapp:qr`, 60s TTL, cleared on connect); `GET /api/v1/providers/whatsapp/qr` (JWT-only); dashboard shows a scan-to-link panel whenever a QR is pending |
 | Swagger | http://localhost:3001/api |
 | Env | `.env` files present at root, `apps/api`, `apps/worker` (SMTP + WhatsApp configured) |
 
 ### In progress / known gaps 🔧
 
 - **WhatsApp status bridge** — `ProvidersService.getWhatsAppStatus()` reads the `whatsapp:status` key from Redis, but the worker never writes it, so the endpoint always reports `unknown`. *(Being fixed today.)*
-- **Dashboard** — v1 + DLQ panel done. Still missing: WhatsApp QR display, pagination/filters UI.
-- **Failed-job reason capture** — `failedReason` sometimes stores a truncated/odd string (saw `"t"` from whatsapp-web.js); processors should store `err?.message ?? String(err)`.
+- **Dashboard** — v1 + DLQ panel + WhatsApp QR done. Still missing: pagination/filters UI.
+- **Stale worker process** — a worker built before the QR/error-capture changes is still running (`dist/main`); restart it (or `pnpm dev`) to activate QR publishing.
 - **Don't run `pnpm build` while `pnpm dev` is running** — `next build` clobbers the dev server's `.next` dir and breaks it until restart. Build only api/worker (`pnpm --filter @communication/api build`) when the stack is up.
 - **Duplicate Message entity** — `apps/worker/src/database/entities/message.entity.ts` is a copy of the API's; should move to `packages/shared` eventually.
 - **Per-key rate limits** — Roadmap calls for configurable limits *per API key*; current throttling is global/per-route.
@@ -71,12 +72,15 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 - **JWT auth implemented**: `users` table (migration `CreateUsers`), `AuthService` with argon2 password verify (timing-safe on unknown emails), `POST /auth/login` (throttled 10/min) returning a 12h JWT, `GET /auth/me`, hand-rolled `JwtAuthGuard` (same style as `ApiKeyGuard`). Seed script now also creates an admin user (`admin@sparkco.local`, password printed once — see terminal or re-seed with `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`). Verified live: login → token → `/auth/me`, plus 401 paths.
 - **Dashboard v1 shipped**: API side — `GET /messages` (JWT, paginated/filterable), `ApiKeyOrJwtGuard` on `/providers/status` (accepts either auth), CORS enabled for `DASHBOARD_ORIGIN`. Dashboard side — `/login` page (stores JWT in localStorage), main page with provider status cards + queue depths + recent-messages table, auto-refresh every 10s, auto-redirect to login on 401. Verified: API endpoints via curl (real data — 3 sent emails in the log), CORS preflight 204, both pages render. `.env.example` updated (5433 port fix, JWT_EXPIRES_IN, SEED_*, DASHBOARD_ORIGIN). Login verified working by Basel; credentials documented in start.md.
 - **DLQ shipped**: `DlqModule` (list/retry/retry-all/discard, JWT-guarded) + red dashboard panel with per-job Retry/Discard and per-channel Retry-all. End-to-end tested live: sent WhatsApp to an invalid number → 3 attempts → landed in DLQ → retried via API (re-failed, attempts 3→4) → discarded → DLQ empty. WhatsApp relinked successfully today (status `connected`).
+- **Processor error capture fixed**: both processors now store `err?.message ?? String(err)` instead of `err.message`.
+- **WhatsApp QR in dashboard shipped**: worker publishes the pairing QR to Redis (`whatsapp:qr`, 60s TTL, cleared on ready/auth_failure/disconnected/shutdown), `GET /providers/whatsapp/qr` (JWT-only — API keys must not be able to pair a device), dashboard renders an amber scan-to-link panel (`qrcode.react`) whenever a QR is pending. Verified live: API booted from the new build, JWT fetch returns `{"qr":null}`, no auth → 401, fake QR set in Redis round-trips through the endpoint. Worker QR publishing not yet live — the running worker predates this build (see gaps).
 - **Committed** everything since the initial commit (migrations, JWT auth, dashboard, DLQ). Removed the admin password from start.md first — verified it was never in any pushed commit, so no rotation needed (start.md now points to `SEED_*` env vars / seed output instead). Scanned the full diff for secrets: clean; `.env`s and WhatsApp sessions confirmed ignored. **Push pending**: no working GitHub credentials in the terminal — `~/.ssh/id_ed25519_github` is not registered with the GitHub account (`Permission denied (publickey)`), no `gh` CLI, no credential helper. Push from VSCode's Source Control, or add the public key to GitHub and `git remote set-url origin git@github.com:basil51/communicat.git`.
 
 ---
 
 ## Next up (priority order)
 
-1. Dashboard: WhatsApp QR display (so linking doesn't require terminal access).
-2. Processors: robust error capture (`err?.message ?? String(err)`).
+1. Push `main` to GitHub (blocked from terminal: SSH key not registered with the account, no `gh`/credential helper — push from VSCode Source Control, or register `~/.ssh/id_ed25519_github.pub` and `git remote set-url origin git@github.com:basil51/communicat.git`).
+2. Restart the worker (or `pnpm dev`) to pick up the new build, then relink WhatsApp via the dashboard QR panel.
 3. Phase 2 kickoff: message templates with `{{variables}}`.
+4. Dashboard: pagination/filters UI for the messages table.

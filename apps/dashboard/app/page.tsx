@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { QRCodeSVG } from 'qrcode.react';
 import { ApiError, apiFetch, clearToken, getToken } from './lib/api';
 
 interface ProvidersStatus {
@@ -65,18 +66,21 @@ export default function DashboardPage() {
   const [providers, setProviders] = useState<ProvidersStatus | null>(null);
   const [messages, setMessages] = useState<MessageList | null>(null);
   const [dlq, setDlq] = useState<DlqList | null>(null);
+  const [whatsappQr, setWhatsappQr] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [prov, msgs, failed] = await Promise.all([
+      const [prov, msgs, failed, qr] = await Promise.all([
         apiFetch<ProvidersStatus>('/providers/status'),
         apiFetch<MessageList>('/messages?limit=25'),
         apiFetch<DlqList>('/dlq'),
+        apiFetch<{ qr: string | null }>('/providers/whatsapp/qr'),
       ]);
       setProviders(prov);
       setMessages(msgs);
       setDlq(failed);
+      setWhatsappQr(qr.qr);
       setError(null);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -152,6 +156,31 @@ export default function DashboardPage() {
             queue={providers?.whatsapp.queue}
           />
         </div>
+
+        {whatsappQr && (
+          <div className="mt-8 rounded-xl border border-amber-200 bg-white shadow-sm overflow-hidden">
+            <div className="border-b border-amber-200 bg-amber-50 px-4 py-3">
+              <h2 className="font-semibold text-amber-700">WhatsApp needs linking</h2>
+            </div>
+            <div className="flex flex-col items-center gap-4 p-6 sm:flex-row sm:items-start">
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <QRCodeSVG value={whatsappQr} size={224} />
+              </div>
+              <ol className="list-decimal space-y-1 pl-5 text-sm text-gray-600">
+                <li>Open WhatsApp on your phone</li>
+                <li>
+                  Go to <span className="font-medium">Settings → Linked devices</span>
+                </li>
+                <li>
+                  Tap <span className="font-medium">Link a device</span> and scan this code
+                </li>
+              </ol>
+            </div>
+            <p className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400">
+              The code rotates automatically — this panel refreshes every 10s and disappears once linked.
+            </p>
+          </div>
+        )}
 
         {failedJobs.length > 0 && (
           <div className="mt-8 rounded-xl border border-red-200 bg-white shadow-sm overflow-hidden">

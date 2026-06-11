@@ -33,7 +33,7 @@ export class WhatsAppProcessor extends WorkerHost {
       await this.messageRepo.update(messageId, {
         status: isLastAttempt ? 'failed' : 'queued',
         retryCount: job.attemptsMade,
-        ...(isLastAttempt && { failedAt: new Date(), errorMessage: err.message }),
+        ...(isLastAttempt && { failedAt: new Date(), errorMessage: err?.message ?? String(err) }),
       });
       throw err;
     }

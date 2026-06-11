@@ -64,4 +64,14 @@ export class ProvidersService {
       return 'unknown';
     }
   }
+
+  // Worker publishes the current pairing QR here while status is qr_required
+  async getWhatsAppQr(): Promise<{ qr: string | null }> {
+    try {
+      const redis = await this.emailQueue.client;
+      return { qr: await redis.get('whatsapp:qr') };
+    } catch {
+      return { qr: null };
+    }
+  }
 }
