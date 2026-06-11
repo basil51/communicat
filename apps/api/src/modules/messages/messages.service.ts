@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { QUEUE_NAMES, MessageJobData } from '@communication/types';
 import { Message } from '../../database/entities/message.entity';
 import { SendMessageDto } from './dto/send-message.dto';
+import { TemplatesService } from '../templates/templates.service';
 
 @Injectable()
 export class MessagesService {
@@ -15,21 +16,41 @@ export class MessagesService {
     private readonly messageRepo: Repository<Message>,
     @InjectQueue(QUEUE_NAMES.EMAIL) private readonly emailQueue: Queue,
     @InjectQueue(QUEUE_NAMES.WHATSAPP) private readonly whatsappQueue: Queue,
+    private readonly templatesService: TemplatesService,
   ) {}
 
   async send(dto: SendMessageDto, apiKeyId?: string) {
     const id = uuidv4();
     const now = new Date();
 
+    let body = dto.message!;
+    let subject = dto.subject ?? null;
+
+    if (dto.templateId) {
+      if (dto.message) {
+        throw new BadRequestException('Provide either message or templateId, not both');
+      }
+      const template = await this.templatesService.findOne(dto.templateId);
+      if (template.channel !== dto.channel) {
+        throw new BadRequestException(
+          `Template "${template.name}" is for channel "${template.channel}", not "${dto.channel}"`,
+        );
+      }
+      const rendered = this.templatesService.render(template, dto.variables);
+      body = rendered.body;
+      subject = dto.subject ?? rendered.subject;
+    }
+
     await this.messageRepo.save(
       this.messageRepo.create({
         id,
         channel: dto.channel,
         to: dto.to,
-        subject: dto.subject ?? null,
-        body: dto.message,
+        subject,
+        body,
         status: 'queued',
         apiKeyId: apiKeyId ?? null,
+        templateId: dto.templateId ?? null,
         queuedAt: now,
       }),
     );
@@ -38,8 +59,8 @@ export class MessagesService {
       messageId: id,
       channel: dto.channel,
       to: dto.to,
-      message: dto.message,
-      subject: dto.subject,
+      message: body,
+      subject: subject ?? undefined,
     };
 
     const queue = dto.channel === 'email' ? this.emailQueue : this.whatsappQueue;

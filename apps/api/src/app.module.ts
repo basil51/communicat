@@ -6,11 +6,13 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { Message } from './database/entities/message.entity';
 import { ApiKey } from './database/entities/api-key.entity';
 import { User } from './database/entities/user.entity';
+import { Template } from './database/entities/template.entity';
 import { AuthModule } from './modules/auth/auth.module';
 import { MessagesModule } from './modules/messages/messages.module';
 import { ProvidersModule } from './modules/providers/providers.module';
 import { HealthModule } from './modules/health/health.module';
 import { DlqModule } from './modules/dlq/dlq.module';
+import { TemplatesModule } from './modules/templates/templates.module';
 
 @Module({
   imports: [
@@ -21,7 +23,7 @@ import { DlqModule } from './modules/dlq/dlq.module';
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
         url: config.get<string>('DATABASE_URL'),
-        entities: [Message, ApiKey, User],
+        entities: [Message, ApiKey, User, Template],
         // Schema is managed by migrations (pnpm db:migrate); never auto-sync
         synchronize: false,
         logging: ['error'],
@@ -45,6 +47,7 @@ import { DlqModule } from './modules/dlq/dlq.module';
     ProvidersModule,
     HealthModule,
     DlqModule,
+    TemplatesModule,
   ],
 })
 export class AppModule {}

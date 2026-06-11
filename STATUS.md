@@ -2,8 +2,8 @@
 
 > Daily working log for the Communication Service. Update at the end of each session.
 
-**Last updated:** 2026-06-11
-**Phase:** 1 — MVP (Email + WhatsApp)
+**Last updated:** 2026-06-12
+**Phase:** 2 — Templates, Scheduling & Webhooks
 
 ---
 
@@ -37,14 +37,14 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 | Dashboard v1 | Login page + dashboard: provider status cards (SMTP/WhatsApp + queue depths), recent-messages table, 10s auto-refresh, 401 → redirect to login |
 | DLQ | `GET /dlq`, `POST /dlq/:channel/:jobId/retry`, `POST /dlq/:channel/retry-all`, `DELETE /dlq/:channel/:jobId` (JWT); dashboard panel with retry/discard buttons (appears when jobs are failed) |
 | WhatsApp QR in dashboard | Worker publishes QR to Redis (`whatsapp:qr`, 60s TTL, cleared on connect); `GET /api/v1/providers/whatsapp/qr` (JWT-only); dashboard shows a scan-to-link panel whenever a QR is pending |
+| Templates (Phase 2) | `templates` table + CRUD at `/api/v1/templates` (API key or JWT); send accepts `templateId` + `variables`, renders `{{placeholders}}` server-side (strict — missing variables → 400), stores rendered body + `template_id` on the message row |
 | Swagger | http://localhost:3001/api |
 | Env | `.env` files present at root, `apps/api`, `apps/worker` (SMTP + WhatsApp configured) |
 
 ### In progress / known gaps 🔧
 
 - **WhatsApp status bridge** — `ProvidersService.getWhatsAppStatus()` reads the `whatsapp:status` key from Redis, but the worker never writes it, so the endpoint always reports `unknown`. *(Being fixed today.)*
-- **Dashboard** — v1 + DLQ panel + WhatsApp QR done. Still missing: pagination/filters UI.
-- **Stale worker process** — a worker built before the QR/error-capture changes is still running (`dist/main`); restart it (or `pnpm dev`) to activate QR publishing.
+- **Dashboard** — v1 + DLQ panel + WhatsApp QR done. Still missing: pagination/filters UI, template management UI.
 - **Don't run `pnpm build` while `pnpm dev` is running** — `next build` clobbers the dev server's `.next` dir and breaks it until restart. Build only api/worker (`pnpm --filter @communication/api build`) when the stack is up.
 - **Duplicate Message entity** — `apps/worker/src/database/entities/message.entity.ts` is a copy of the API's; should move to `packages/shared` eventually.
 - **Per-key rate limits** — Roadmap calls for configurable limits *per API key*; current throttling is global/per-route.
@@ -78,9 +78,16 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 
 ---
 
+### 2026-06-12
+- Basel pushed `main` to GitHub (both pending commits) from VSCode.
+- Killed the stale duplicate worker from yesterday (pid 1305108, old build) — only the `pnpm dev` worker remains, running the QR-publishing build. WhatsApp status: `connected`, no QR pending (correct).
+- **Phase 2 kickoff — message templates shipped**: `Template` entity + `CreateTemplates` migration (also adds `messages.template_id`), `TemplatesModule` with full CRUD at `/api/v1/templates` (ApiKeyOrJwtGuard, 409 on duplicate names), send endpoint now takes `templateId` + `variables` and renders `{{placeholders}}` server-side before persisting/queueing (worker untouched — it only ever sees rendered text). Strict rendering: any placeholder without a value → 400 listing the missing keys; channel mismatch and message+templateId both → 400. Verified live end-to-end: created `order-confirmation` template, sent a real templated email to basel51@gmail.com (status `sent`, rendered subject/body + `template_id` confirmed in DB), all error paths, PATCH/DELETE/409/401. Test API key from seeding deactivated afterwards.
+
+---
+
 ## Next up (priority order)
 
-1. Push `main` to GitHub (blocked from terminal: SSH key not registered with the account, no `gh`/credential helper — push from VSCode Source Control, or register `~/.ssh/id_ed25519_github.pub` and `git remote set-url origin git@github.com:basil51/communicat.git`).
-2. Restart the worker (or `pnpm dev`) to pick up the new build, then relink WhatsApp via the dashboard QR panel.
-3. Phase 2 kickoff: message templates with `{{variables}}`.
-4. Dashboard: pagination/filters UI for the messages table.
+1. Push the templates commit to GitHub (terminal push still blocked — push from VSCode, or register `~/.ssh/id_ed25519_github.pub` with GitHub and `git remote set-url origin git@github.com:basil51/communicat.git`).
+2. Phase 2 continued: scheduled messages (send at datetime) + delayed messages — BullMQ `delay` option makes this cheap.
+3. Phase 2: bulk messaging (list of recipients in one call) and webhooks (delivery status callbacks).
+4. Dashboard: template management UI; pagination/filters for the messages table.

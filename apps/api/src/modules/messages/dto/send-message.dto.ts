@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsObject, IsOptional, IsString, IsUUID, ValidateIf } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { MessageChannel } from '@communication/types';
 
@@ -12,13 +12,27 @@ export class SendMessageDto {
   @IsNotEmpty()
   to: string;
 
-  @ApiProperty({ example: 'Hello from Communication Service' })
+  @ApiPropertyOptional({ example: 'Hello from Communication Service', description: 'Message body (required unless templateId is provided)' })
+  @ValidateIf((o) => !o.templateId)
   @IsString()
   @IsNotEmpty()
-  message: string;
+  message?: string;
 
-  @ApiPropertyOptional({ example: 'Welcome!', description: 'Subject (email only)' })
+  @ApiPropertyOptional({ example: 'Welcome!', description: 'Subject (email only; overrides the template subject)' })
   @IsOptional()
   @IsString()
   subject?: string;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Send a stored template instead of a literal message' })
+  @IsOptional()
+  @IsUUID()
+  templateId?: string;
+
+  @ApiPropertyOptional({
+    example: { name: 'Basel', orderId: 'SO-1042' },
+    description: 'Values for the {{placeholders}} in the template',
+  })
+  @IsOptional()
+  @IsObject()
+  variables?: Record<string, string>;
 }

@@ -28,6 +28,9 @@ export class Message {
   @Column({ name: 'tenant_id', nullable: true, type: 'varchar' })
   tenantId: string | null;
 
+  @Column({ name: 'template_id', nullable: true, type: 'varchar' })
+  templateId: string | null;
+
   @Column({ name: 'retry_count', default: 0 })
   retryCount: number;
 
