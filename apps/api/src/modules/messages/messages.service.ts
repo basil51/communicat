@@ -53,6 +53,37 @@ export class MessagesService {
     return { id, status: 'queued' as const };
   }
 
+  async list(query: { limit: number; offset: number; status?: string; channel?: string }) {
+    const where: Record<string, string> = {};
+    if (query.status) where.status = query.status;
+    if (query.channel) where.channel = query.channel;
+
+    const [items, total] = await this.messageRepo.findAndCount({
+      where,
+      order: { createdAt: 'DESC' },
+      take: query.limit,
+      skip: query.offset,
+    });
+
+    return {
+      total,
+      limit: query.limit,
+      offset: query.offset,
+      items: items.map((m) => ({
+        id: m.id,
+        channel: m.channel,
+        to: m.to,
+        subject: m.subject,
+        status: m.status,
+        errorMessage: m.errorMessage,
+        retryCount: m.retryCount,
+        createdAt: m.createdAt,
+        sentAt: m.sentAt,
+        failedAt: m.failedAt,
+      })),
+    };
+  }
+
   async getStatus(id: string) {
     const msg = await this.messageRepo.findOne({ where: { id } });
     if (!msg) throw new NotFoundException('Message not found');

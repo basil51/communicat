@@ -5,10 +5,12 @@ import { BullModule } from '@nestjs/bullmq';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { Message } from './database/entities/message.entity';
 import { ApiKey } from './database/entities/api-key.entity';
+import { User } from './database/entities/user.entity';
 import { AuthModule } from './modules/auth/auth.module';
 import { MessagesModule } from './modules/messages/messages.module';
 import { ProvidersModule } from './modules/providers/providers.module';
 import { HealthModule } from './modules/health/health.module';
+import { DlqModule } from './modules/dlq/dlq.module';
 
 @Module({
   imports: [
@@ -19,7 +21,7 @@ import { HealthModule } from './modules/health/health.module';
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
         url: config.get<string>('DATABASE_URL'),
-        entities: [Message, ApiKey],
+        entities: [Message, ApiKey, User],
         // Schema is managed by migrations (pnpm db:migrate); never auto-sync
         synchronize: false,
         logging: ['error'],
@@ -42,6 +44,7 @@ import { HealthModule } from './modules/health/health.module';
     MessagesModule,
     ProvidersModule,
     HealthModule,
+    DlqModule,
   ],
 })
 export class AppModule {}

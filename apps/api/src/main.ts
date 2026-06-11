@@ -9,12 +9,14 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  app.enableCors({ origin: process.env.DASHBOARD_ORIGIN ?? 'http://localhost:3000' });
 
   const config = new DocumentBuilder()
     .setTitle('Communication Service')
     .setDescription('Unified messaging API')
     .setVersion('1.0')
     .addApiKey({ type: 'apiKey', name: 'X-API-Key', in: 'header' }, 'api-key')
+    .addBearerAuth()
     .build();
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, config));
 

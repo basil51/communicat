@@ -49,6 +49,16 @@ API docs (Swagger): http://localhost:3001/api
 
 ---
 
+## Dashboard sign-in
+
+http://localhost:3000 (redirects to `/login`)
+
+Sign in with the admin user created by the seed script (`admin@sparkco.local` by default). The password is set via `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` in `.env`, or generated and printed once when you run `pnpm --filter @communication/api seed`.
+
+> Forgot it? Delete the user row and re-run the seed to get a fresh password.
+
+---
+
 ## End of day
 
 ```bash

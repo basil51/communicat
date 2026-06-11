@@ -1,11 +1,12 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { ApiSecurity, ApiTags, ApiOperation } from '@nestjs/swagger';
-import { ApiKeyGuard } from '../auth/guards/api-key.guard';
+import { ApiBearerAuth, ApiSecurity, ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiKeyOrJwtGuard } from '../auth/guards/api-key-or-jwt.guard';
 import { ProvidersService } from './providers.service';
 
 @ApiTags('providers')
 @ApiSecurity('api-key')
-@UseGuards(ApiKeyGuard)
+@ApiBearerAuth()
+@UseGuards(ApiKeyOrJwtGuard)
 @Controller('providers')
 export class ProvidersController {
   constructor(private readonly providersService: ProvidersService) {}
