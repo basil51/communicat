@@ -26,7 +26,7 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 | API: provider status | `GET /api/v1/providers/status` — SMTP verify + queue depths + WhatsApp status from Redis |
 | API: health | `GET /api/v1/health` |
 | API key auth | `ApiKeyGuard` — SHA-256 hashed keys, `isActive` check, `lastUsedAt` tracking |
-| Rate limiting | Global throttler (200/min) + 60/min on send endpoint |
+| Rate limiting | Global throttler (200/min per IP) + per-API-key message budget on send/send-bulk (`rate_limit_per_minute` column, null → `API_KEY_RATE_LIMIT_PER_MINUTE` env default 60; bulk costs its recipient count; 429 + `Retry-After`) |
 | Worker: email | Nodemailer SMTP processor, status transitions (queued → processing → sent/failed) |
 | Worker: WhatsApp | `whatsapp-web.js` with LocalAuth session persistence, QR login via terminal, reconnect events |
 | WhatsApp session | Logged in — session persisted under `apps/worker/sessions/` (gitignored) |
@@ -50,7 +50,6 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 - **Dashboard** — v1 + DLQ panel + WhatsApp QR done. Still missing: pagination/filters UI, template/webhook management UI.
 - **Don't run `pnpm build` while `pnpm dev` is running** — `next build` clobbers the dev server's `.next` dir and breaks it until restart. Build only api/worker (`pnpm --filter @communication/api build`) when the stack is up.
 - **Duplicate Message entity** — `apps/worker/src/database/entities/message.entity.ts` is a copy of the API's; should move to `packages/shared` eventually.
-- **Per-key rate limits** — Roadmap calls for configurable limits *per API key*; current throttling is global/per-route.
 (Verified: the `messages` entity already carries the nullable `tenant_id` column required by the Phase 3 design note.)
 
 ---
@@ -94,13 +93,14 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 - Basel pushed the remaining Phase 2 commits to GitHub from VSCode (`main` in sync with origin). Terminal push still blocked (SSH key not registered with GitHub).
 - **Stray-worker bug fixed (root cause)**: on watch restarts the nest CLI tree-kills its `sh -c node dist/main` child, but puppeteer (whatsapp-web.js) installs SIGTERM/SIGINT listeners that disable Node's default exit-on-signal — the old worker survived and competed for queue jobs/the WhatsApp session. Fix: explicit SIGTERM/SIGINT handler in worker `main.ts` (closes the app, force-exits after 8s deadline) + dev script now sweeps strays (`pkill -f 'worker/dist/main$'`, `$`-anchored so it can't kill its own wrapper shell) before starting the watcher. Verified live: two consecutive watch restarts each left exactly one worker, WhatsApp reconnected (`connected`) after.
 
+- **Per-key rate limits shipped (last Phase 1 leftover)**: `rate_limit_per_minute` column on `api_keys` (`AddApiKeyRateLimit` migration; null → `API_KEY_RATE_LIMIT_PER_MINUTE` env default 60) enforced by `ApiKeyRateLimitGuard` — fixed 1-minute Redis window (`INCRBY`, key TTL 2×window), runs after `ApiKeyGuard` on send + send-bulk, counts *messages* (bulk costs its recipient count, clamped to 100), 429 with `Retry-After` header. Replaced the old per-IP route `@Throttle`s (global 200/min/IP backstop remains). Note: BullMQ ≥5.78 types `queue.client` as a narrow `IRedisClient` — its runtime proxy still forwards `incrby`/`expire` to ioredis, hence the local cast in the guard. Verified live with a 3/min key: 3 requests passed then 429 (`Retry-After: 9`), and a 5-recipient bulk on a fresh window 429'd immediately; test limits reset to NULL after.
+
 ---
 
 ## Next up (priority order)
 
-**Phase 2 is feature-complete** (templates, scheduled/delayed, bulk, webhooks).
+**Phase 2 is feature-complete** (templates, scheduled/delayed, bulk, webhooks), and per-key rate limits closed out Phase 1.
 
-1. Per-key rate limits (Phase 1 leftover) — Roadmap calls for configurable limits per API key; current throttling is global/per-route.
-2. Dashboard: template/webhook management UI; pagination/filters for the messages table.
-3. Decide on `delivered` tracking: Roadmap (Phase 1 lifecycle + Phase 2 webhooks) mentions a `delivered` status, but nothing implements it (WhatsApp would need message-ack listeners; SMTP can't really support it). Build for WhatsApp or drop from scope.
-4. Phase 3 kickoff: multi-tenant (tenants table, scoped API keys, row-level isolation on the existing `tenant_id` columns).
+1. Dashboard: template/webhook management UI; pagination/filters for the messages table.
+2. Decide on `delivered` tracking: Roadmap (Phase 1 lifecycle + Phase 2 webhooks) mentions a `delivered` status, but nothing implements it (WhatsApp would need message-ack listeners; SMTP can't really support it). Build for WhatsApp or drop from scope.
+3. Phase 3 kickoff: multi-tenant (tenants table, scoped API keys, row-level isolation on the existing `tenant_id` columns).

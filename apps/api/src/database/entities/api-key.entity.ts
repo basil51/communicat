@@ -17,6 +17,10 @@ export class ApiKey {
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 
+  // null = use the API_KEY_RATE_LIMIT_PER_MINUTE env default
+  @Column({ name: 'rate_limit_per_minute', type: 'int', nullable: true })
+  rateLimitPerMinute: number | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 
