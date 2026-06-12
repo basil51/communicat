@@ -48,7 +48,6 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 
 - **WhatsApp status bridge** — `ProvidersService.getWhatsAppStatus()` reads the `whatsapp:status` key from Redis, but the worker never writes it, so the endpoint always reports `unknown`. *(Being fixed today.)*
 - **Dashboard** — v1 + DLQ panel + WhatsApp QR done. Still missing: pagination/filters UI, template/webhook management UI.
-- **Stray worker processes on `pnpm dev`** — `nest start --watch` (worker) spawns `node dist/main` via `sh -c` and orphans the old process on some restarts; duplicates then compete for queue jobs and the WhatsApp session. Happened 2026-06-11 and again today (4 strays). Workaround: `pkill -f 'worker/dist/main'` then let watch respawn. Real fix: investigate `--watch` restart behavior or add a dev script that kills strays first.
 - **Don't run `pnpm build` while `pnpm dev` is running** — `next build` clobbers the dev server's `.next` dir and breaks it until restart. Build only api/worker (`pnpm --filter @communication/api build`) when the stack is up.
 - **Duplicate Message entity** — `apps/worker/src/database/entities/message.entity.ts` is a copy of the API's; should move to `packages/shared` eventually.
 - **Per-key rate limits** — Roadmap calls for configurable limits *per API key*; current throttling is global/per-route.
@@ -92,13 +91,16 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 - **WhatsApp send verified live to a real number**: test message to Basel's +972515622300 → `sent` in ~250 ms, received on the phone. (The lone `failed` WhatsApp row in the dashboard is the *deliberate* invalid-number DLQ test from 2026-06-11, not a channel problem.) Seeded a fresh API key for this; it's still active for further WhatsApp testing.
 - **Scheduled + delayed messages shipped**: `sendAt` (ISO 8601) or `delaySeconds` on the send endpoint (mutually exclusive; both capped at 30 days; past `sendAt` → 400) map to BullMQ's `delay` option. New `scheduled` message status (`@communication/types` union extended) + `scheduled_at` column (`AddScheduledAt` migration); response returns `{status:"scheduled", scheduledAt}`. Dashboard shows scheduled messages with a purple badge. Verified live: 15s-delayed templated email — status `scheduled` immediately, worker picked it up 150ms after the scheduled time, `sent` confirmed; all three 400 paths tested. Also removed stale build artifacts (`index.js`/`index.d.ts`) from `packages/types/src/` that would have shadowed type changes.
 
+- Basel pushed the remaining Phase 2 commits to GitHub from VSCode (`main` in sync with origin). Terminal push still blocked (SSH key not registered with GitHub).
+- **Stray-worker bug fixed (root cause)**: on watch restarts the nest CLI tree-kills its `sh -c node dist/main` child, but puppeteer (whatsapp-web.js) installs SIGTERM/SIGINT listeners that disable Node's default exit-on-signal — the old worker survived and competed for queue jobs/the WhatsApp session. Fix: explicit SIGTERM/SIGINT handler in worker `main.ts` (closes the app, force-exits after 8s deadline) + dev script now sweeps strays (`pkill -f 'worker/dist/main$'`, `$`-anchored so it can't kill its own wrapper shell) before starting the watcher. Verified live: two consecutive watch restarts each left exactly one worker, WhatsApp reconnected (`connected`) after.
+
 ---
 
 ## Next up (priority order)
 
 **Phase 2 is feature-complete** (templates, scheduled/delayed, bulk, webhooks).
 
-1. Push the 4 unpushed commits to GitHub (terminal push still blocked — push from VSCode, or register `~/.ssh/id_ed25519_github.pub` with GitHub and `git remote set-url origin git@github.com:basil51/communicat.git`).
-2. Fix the stray-worker problem in `pnpm dev` (see gaps) — it has now bitten twice.
-3. Dashboard: template/webhook management UI; pagination/filters for the messages table.
-4. Per-key rate limits (Phase 1 leftover), then Phase 3 kickoff: multi-tenant (tenants table, scoped API keys, row-level isolation on the existing `tenant_id` columns).
+1. Per-key rate limits (Phase 1 leftover) — Roadmap calls for configurable limits per API key; current throttling is global/per-route.
+2. Dashboard: template/webhook management UI; pagination/filters for the messages table.
+3. Decide on `delivered` tracking: Roadmap (Phase 1 lifecycle + Phase 2 webhooks) mentions a `delivered` status, but nothing implements it (WhatsApp would need message-ack listeners; SMTP can't really support it). Build for WhatsApp or drop from scope.
+4. Phase 3 kickoff: multi-tenant (tenants table, scoped API keys, row-level isolation on the existing `tenant_id` columns).
