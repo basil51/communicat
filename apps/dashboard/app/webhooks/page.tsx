@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ApiError, apiFetch, clearToken, getToken } from '../lib/api';
 import { Nav } from '../components/nav';
 
-type WebhookEvent = 'message.sent' | 'message.failed';
+type WebhookEvent = 'message.sent' | 'message.failed' | 'message.delivered';
 
 interface Webhook {
   id: string;
@@ -16,7 +16,7 @@ interface Webhook {
   createdAt: string;
 }
 
-const ALL_EVENTS: WebhookEvent[] = ['message.sent', 'message.failed'];
+const ALL_EVENTS: WebhookEvent[] = ['message.sent', 'message.failed', 'message.delivered'];
 
 export default function WebhooksPage() {
   const router = useRouter();

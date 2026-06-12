@@ -28,8 +28,8 @@ export class WhatsAppProcessor extends WorkerHost {
     await this.messageRepo.update(messageId, { status: 'processing', processingAt: new Date() });
 
     try {
-      await this.whatsappService.sendMessage(to, message);
-      await this.messageRepo.update(messageId, { status: 'sent', sentAt: new Date() });
+      const providerMessageId = await this.whatsappService.sendMessage(to, message);
+      await this.messageRepo.update(messageId, { status: 'sent', sentAt: new Date(), providerMessageId });
       await this.webhooks.dispatch('message.sent', { messageId, channel: 'whatsapp', to, status: 'sent' });
     } catch (err: any) {
       const isLastAttempt = job.attemptsMade >= (job.opts.attempts ?? 1) - 1;

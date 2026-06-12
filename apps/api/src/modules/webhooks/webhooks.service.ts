@@ -18,7 +18,7 @@ export class WebhooksService {
       this.webhookRepo.create({
         id: randomUUID(),
         url: dto.url,
-        events: dto.events ?? ['message.sent', 'message.failed'],
+        events: dto.events ?? ['message.sent', 'message.failed', 'message.delivered'],
         secret: 'whsec_' + randomBytes(24).toString('hex'),
         isActive: dto.isActive ?? true,
       }),

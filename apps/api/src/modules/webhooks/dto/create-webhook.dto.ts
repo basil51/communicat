@@ -2,7 +2,7 @@ import { ArrayMinSize, IsArray, IsBoolean, IsIn, IsOptional, IsUrl } from 'class
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { WebhookEvent } from '@communication/types';
 
-const WEBHOOK_EVENTS: WebhookEvent[] = ['message.sent', 'message.failed'];
+const WEBHOOK_EVENTS: WebhookEvent[] = ['message.sent', 'message.failed', 'message.delivered'];
 
 export class CreateWebhookDto {
   @ApiProperty({ example: 'https://example.com/hooks/communication', description: 'Callback URL (POSTed with a signed JSON payload)' })

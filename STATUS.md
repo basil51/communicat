@@ -40,6 +40,7 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 | Templates (Phase 2) | `templates` table + CRUD at `/api/v1/templates` (API key or JWT); send accepts `templateId` + `variables`, renders `{{placeholders}}` server-side (strict — missing variables → 400), stores rendered body + `template_id` on the message row |
 | Scheduled/delayed (Phase 2) | Send accepts `sendAt` (ISO datetime) or `delaySeconds` (mutually exclusive, max 30 days) → BullMQ `delay`; new `scheduled` status + `scheduled_at` column; status flips to processing/sent when the job fires; purple badge in dashboard |
 | Bulk messaging (Phase 2) | `POST /api/v1/messages/send-bulk` — up to 100 recipients, per-recipient template variables, all rendered before anything persists (one bad recipient → 400, nothing queued); shared `batch_id` (indexed), `GET /messages?batchId=` filter; 10 calls/min |
+| Delivered tracking (WhatsApp) | `message_ack` listener (ACK_DEVICE+) flips `sent` → `delivered` (`delivered_at`, `provider_message_id` columns — `AddDeliveredTracking` migration) and fires a `message.delivered` webhook; email stays at `sent` (SMTP can't report delivery) |
 | Webhooks (Phase 2) | `webhooks` table + CRUD at `/api/v1/webhooks` (API key or JWT); worker dispatches `message.sent`/`message.failed` through a `webhooks` BullMQ queue — one delivery job per subscribed endpoint, HMAC-SHA256 signed (`X-Webhook-Signature: sha256=…` with the `whsec_…` secret), 10s timeout, 3 retries, failures land in the DLQ (third channel in `/dlq` + dashboard) |
 | Swagger | http://localhost:3001/api |
 | Env | `.env` files present at root, `apps/api`, `apps/worker` (SMTP + WhatsApp configured) |
@@ -97,11 +98,12 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 
 - **Dashboard management UI shipped**: shared nav header (Overview / Templates / Webhooks + sign out); `/templates` page (create/edit/delete with channel-aware subject field, 409-duplicate errors surfaced); `/webhooks` page (register with event checkboxes, pause/resume via `isActive` PATCH, secret hidden by default with Show/Copy, delete); messages table got status+channel filter dropdowns and Previous/Next pagination (25/page, filters reset offset). All client-side against existing JWT endpoints — no API changes. Verified: `tsc --noEmit` clean, all four routes 200 on the dev server.
 
+- **Delivered tracking shipped (WhatsApp)**: `whatsapp.service` now returns the provider message id from `sendMessage` (processor stores it as `provider_message_id`, indexed) and listens to `message_ack` — ack ≥ ACK_DEVICE on an own message flips a `sent` row to `delivered` (+`delivered_at`) and dispatches a new `message.delivered` webhook event (added to `@communication/types`, webhook DTOs/default events, dashboard event checkboxes + status filter; `GET /messages/:id` returns `deliveredAt`). Ack-vs-processor write race handled with one 2s retry on lookup miss. Email intentionally stays at `sent` — SMTP can't report device delivery. Verified live: real send to Basel's number went queued → processing → sent → **delivered 278 ms later** via the ack.
+
 ---
 
 ## Next up (priority order)
 
-**Phase 2 is feature-complete** (templates, scheduled/delayed, bulk, webhooks), per-key rate limits closed out Phase 1, and the dashboard now has template/webhook management + messages pagination/filters.
+**Phases 1 & 2 fully closed** — incl. per-key rate limits, dashboard management UI, and WhatsApp delivered-tracking.
 
-1. Decide on `delivered` tracking: Roadmap (Phase 1 lifecycle + Phase 2 webhooks) mentions a `delivered` status, but nothing implements it (WhatsApp would need message-ack listeners; SMTP can't really support it). Build for WhatsApp or drop from scope.
-2. Phase 3 kickoff: multi-tenant (tenants table, scoped API keys, row-level isolation on the existing `tenant_id` columns).
+1. Phase 3 kickoff: multi-tenant (tenants table, scoped API keys, row-level isolation on the existing `tenant_id` columns).

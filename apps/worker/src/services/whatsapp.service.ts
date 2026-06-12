@@ -2,9 +2,13 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { Client, LocalAuth } from 'whatsapp-web.js';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Client, LocalAuth, MessageAck } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode-terminal';
 import { QUEUE_NAMES } from '@communication/types';
+import { Message } from '../database/entities/message.entity';
+import { WebhookDispatcherService } from './webhook-dispatcher.service';
 
 export type WhatsAppStatus = 'disconnected' | 'qr_required' | 'connected';
 
@@ -26,6 +30,8 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly config: ConfigService,
     @InjectQueue(QUEUE_NAMES.WHATSAPP) private readonly queue: Queue,
+    @InjectRepository(Message) private readonly messageRepo: Repository<Message>,
+    private readonly webhooks: WebhookDispatcherService,
   ) {}
 
   async onModuleInit() {
@@ -70,6 +76,12 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
       this.setStatus('disconnected');
       void this.clearQr();
       this.logger.error(`WhatsApp auth failed: ${msg}`);
+    });
+
+    this.client.on('message_ack', (msg, ack) => {
+      // ACK_DEVICE (2) = arrived on the recipient's phone; READ/PLAYED imply it
+      if (!msg.fromMe || ack < MessageAck.ACK_DEVICE) return;
+      void this.markDelivered(msg.id._serialized);
     });
 
     this.client.on('disconnected', (reason) => {
@@ -134,12 +146,37 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
     return this.status;
   }
 
-  async sendMessage(to: string, message: string): Promise<void> {
+  async sendMessage(to: string, message: string): Promise<string> {
     if (!this.ready) {
       throw new Error(`WhatsApp not ready (status: ${this.status})`);
     }
     const chatId = to.replace(/\D/g, '') + '@c.us';
-    await this.client.sendMessage(chatId, message);
+    const sent = await this.client.sendMessage(chatId, message);
     this.logger.log(`WhatsApp message sent to ${to}`);
+    return sent.id._serialized;
+  }
+
+  private async markDelivered(providerMessageId: string, attempt = 0): Promise<void> {
+    try {
+      const row = await this.messageRepo.findOne({ where: { providerMessageId } });
+      if (!row) {
+        // The ack can race the processor's providerMessageId write — retry once
+        if (attempt === 0) {
+          setTimeout(() => void this.markDelivered(providerMessageId, 1), 2000);
+        }
+        return;
+      }
+      if (row.status !== 'sent') return;
+      await this.messageRepo.update(row.id, { status: 'delivered', deliveredAt: new Date() });
+      await this.webhooks.dispatch('message.delivered', {
+        messageId: row.id,
+        channel: 'whatsapp',
+        to: row.to,
+        status: 'delivered',
+      });
+      this.logger.log(`WhatsApp message ${row.id} delivered`);
+    } catch (err: any) {
+      this.logger.warn(`Failed to mark message delivered: ${err?.message ?? err}`);
+    }
   }
 }

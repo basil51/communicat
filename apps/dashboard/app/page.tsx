@@ -56,7 +56,7 @@ interface DlqList {
 const REFRESH_MS = 10_000;
 const PAGE_SIZE = 25;
 
-const STATUSES = ['scheduled', 'queued', 'processing', 'sent', 'failed'] as const;
+const STATUSES = ['scheduled', 'queued', 'processing', 'sent', 'delivered', 'failed'] as const;
 const CHANNELS = ['email', 'whatsapp'] as const;
 
 const statusColors: Record<string, string> = {

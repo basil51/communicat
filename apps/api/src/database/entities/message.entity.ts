@@ -59,4 +59,12 @@ export class Message {
 
   @Column({ name: 'failed_at', nullable: true, type: 'timestamptz' })
   failedAt: Date | null;
+
+  @Column({ name: 'delivered_at', nullable: true, type: 'timestamptz' })
+  deliveredAt: Date | null;
+
+  // WhatsApp message id from the provider — the ack handler looks rows up by it
+  @Index()
+  @Column({ name: 'provider_message_id', nullable: true, type: 'varchar' })
+  providerMessageId: string | null;
 }

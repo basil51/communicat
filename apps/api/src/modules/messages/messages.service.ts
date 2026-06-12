@@ -227,6 +227,7 @@ export class MessagesService {
       queuedAt: msg.queuedAt,
       processingAt: msg.processingAt,
       sentAt: msg.sentAt,
+      deliveredAt: msg.deliveredAt,
       failedAt: msg.failedAt,
       errorMessage: msg.errorMessage,
     };

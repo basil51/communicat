@@ -28,7 +28,8 @@ export interface MessageStatusResult extends MessageResult {
   errorMessage?: string;
 }
 
-export type WebhookEvent = 'message.sent' | 'message.failed';
+// message.delivered fires only for WhatsApp (device ack); SMTP cannot report delivery
+export type WebhookEvent = 'message.sent' | 'message.failed' | 'message.delivered';
 
 export interface WebhookEventPayload {
   messageId: string;
