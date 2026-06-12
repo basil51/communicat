@@ -20,7 +20,7 @@ export class MessagesController {
   @ApiResponse({ status: 202, description: 'Message queued' })
   @ApiResponse({ status: 429, description: 'API key rate limit exceeded (see Retry-After header)' })
   send(@Body() dto: SendMessageDto, @Request() req: any) {
-    return this.messagesService.send(dto, req.apiKey?.id);
+    return this.messagesService.send(dto, req.apiKey);
   }
 
   @Post('send-bulk')
@@ -30,7 +30,7 @@ export class MessagesController {
   @ApiResponse({ status: 202, description: 'Batch queued' })
   @ApiResponse({ status: 429, description: 'API key rate limit exceeded (counts recipients; see Retry-After header)' })
   sendBulk(@Body() dto: SendBulkDto, @Request() req: any) {
-    return this.messagesService.sendBulk(dto, req.apiKey?.id);
+    return this.messagesService.sendBulk(dto, req.apiKey);
   }
 
   @Get()
@@ -44,8 +44,8 @@ export class MessagesController {
   @Get(':id')
   @UseGuards(ApiKeyGuard)
   @ApiSecurity('api-key')
-  @ApiOperation({ summary: 'Get message delivery status' })
-  getStatus(@Param('id') id: string) {
-    return this.messagesService.getStatus(id);
+  @ApiOperation({ summary: 'Get message delivery status (scoped to the key’s tenant)' })
+  getStatus(@Param('id') id: string, @Request() req: any) {
+    return this.messagesService.getStatus(id, req.apiKey);
   }
 }

@@ -2,8 +2,8 @@
 
 > Daily working log for the Communication Service. Update at the end of each session.
 
-**Last updated:** 2026-06-12
-**Phase:** 2 — Templates, Scheduling & Webhooks
+**Last updated:** 2026-06-13
+**Phase:** 3 — Multi-Tenant
 
 ---
 
@@ -42,13 +42,19 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 | Bulk messaging (Phase 2) | `POST /api/v1/messages/send-bulk` — up to 100 recipients, per-recipient template variables, all rendered before anything persists (one bad recipient → 400, nothing queued); shared `batch_id` (indexed), `GET /messages?batchId=` filter; 10 calls/min |
 | Delivered tracking (WhatsApp) | `message_ack` listener (ACK_DEVICE+) flips `sent` → `delivered` (`delivered_at`, `provider_message_id` columns — `AddDeliveredTracking` migration) and fires a `message.delivered` webhook; email stays at `sent` (SMTP can't report delivery) |
 | Webhooks (Phase 2) | `webhooks` table + CRUD at `/api/v1/webhooks` (API key or JWT); worker dispatches `message.sent`/`message.failed` through a `webhooks` BullMQ queue — one delivery job per subscribed endpoint, HMAC-SHA256 signed (`X-Webhook-Signature: sha256=…` with the `whsec_…` secret), 10s timeout, 3 retries, failures land in the DLQ (third channel in `/dlq` + dashboard) |
+| Tenants (Phase 3) | `tenants` table (`CreateTenants` migration) + CRUD at `/api/v1/tenants` (JWT-only); deactivating a tenant 401s all its keys instantly; DELETE → 409 while keys/templates/webhooks reference it (FKs) |
+| API key management (Phase 3) | `/api/v1/api-keys` CRUD (JWT-only) — keys no longer require the seed script; per-key `tenantId`, `allowedChannels` (null = all; 403 on disallowed channel), `rateLimitPerMinute`; plaintext returned exactly once on create |
+| Row-level isolation (Phase 3) | All reads/writes scoped via `TenantScope` (`tenant-scope.ts`): API keys see only their tenant's messages/templates/webhooks (404 cross-tenant), platform keys (null tenant) see only untenanted rows, JWT admins see all (+ `tenantId` filters on `GET /messages` and `/api-keys`); template names unique per tenant (`UNIQUE NULLS NOT DISTINCT`); messages stamped with `tenant_id` (indexed) |
+| Tenant-scoped webhooks (Phase 3) | Worker dispatch filters by tenant: tenant webhooks receive only their tenant's events, global (null-tenant, admin-created) webhooks receive everything; `tenantId` travels in `MessageJobData` and the webhook payload |
 | Swagger | http://localhost:3001/api |
 | Env | `.env` files present at root, `apps/api`, `apps/worker` (SMTP + WhatsApp configured) |
 
 ### In progress / known gaps 🔧
 
-- **WhatsApp status bridge** — `ProvidersService.getWhatsAppStatus()` reads the `whatsapp:status` key from Redis, but the worker never writes it, so the endpoint always reports `unknown`. *(Being fixed today.)*
-- **Dashboard messages table** — has pagination + status/channel filters; `batchId` filter exists in the API but has no UI control yet.
+- **Dashboard messages table** — has pagination + status/channel filters; `batchId` and `tenantId` filters exist in the API but have no UI controls yet.
+- **No dashboard UI for tenants / API keys yet** — Phase 3 endpoints are JWT-ready but only reachable via curl/Swagger.
+- **CreateTenants migration is hand-written** — `UNIQUE NULLS NOT DISTINCT` isn't expressible in TypeORM decorators, so a future `db:migration:generate` may try to drop `UQ_templates_tenant_name`; review generated migrations before running.
+- **Phase 3 leftovers** — per-tenant usage tracking/quotas and per-tenant provider credentials (own SMTP / WhatsApp session) not started.
 - **Don't run `pnpm build` while `pnpm dev` is running** — `next build` clobbers the dev server's `.next` dir and breaks it until restart. Build only api/worker (`pnpm --filter @communication/api build`) when the stack is up.
 - **Duplicate Message entity** — `apps/worker/src/database/entities/message.entity.ts` is a copy of the API's; should move to `packages/shared` eventually.
 (Verified: the `messages` entity already carries the nullable `tenant_id` column required by the Phase 3 design note.)
@@ -100,10 +106,20 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 
 - **Delivered tracking shipped (WhatsApp)**: `whatsapp.service` now returns the provider message id from `sendMessage` (processor stores it as `provider_message_id`, indexed) and listens to `message_ack` — ack ≥ ACK_DEVICE on an own message flips a `sent` row to `delivered` (+`delivered_at`) and dispatches a new `message.delivered` webhook event (added to `@communication/types`, webhook DTOs/default events, dashboard event checkboxes + status filter; `GET /messages/:id` returns `deliveredAt`). Ack-vs-processor write race handled with one 2s retry on lookup miss. Email intentionally stays at `sent` — SMTP can't report device delivery. Verified live: real send to Basel's number went queued → processing → sent → **delivered 278 ms later** via the ack.
 
+### 2026-06-13
+- **Phase 3 kickoff — multi-tenant core shipped**: `tenants` table + `CreateTenants` migration (hand-written: adds `api_keys.allowed_channels`, FKs from api_keys/templates/webhooks → tenants, `messages.tenant_id` index, and swaps the global template-name unique for `UNIQUE NULLS NOT DISTINCT (tenant_id, name)`; run/revert round-trip verified on the dev DB).
+- **Tenants CRUD** at `/api/v1/tenants` (JWT-only): create/list/get/patch/delete; deactivating a tenant makes every one of its API keys 401 immediately (both guards check `tenants.is_active`); delete is FK-protected → 409 with a helpful message while keys/templates/webhooks remain.
+- **API key management** at `/api/v1/api-keys` (JWT-only): create (plaintext `cs_…` returned exactly once, only SHA-256 stored, 404 on bogus/inactive tenant), list (optionally by tenant, never exposes hashes), patch (name/isActive/allowedChannels/rateLimitPerMinute), delete. Seed script no longer the only way to mint keys.
+- **Row-level isolation**: new `TenantScope` helper (`modules/auth/tenant-scope.ts`) drives every templates/webhooks/messages query — API keys are confined to their tenant (cross-tenant access → 404), platform keys (tenant NULL) see only untenanted rows, JWT admins see everything with optional `tenantId` filters on `GET /messages` + `GET /api-keys`. Messages stamp `tenant_id` from the sending key; send/`send-bulk` enforce `allowedChannels` (403). PATCH can't move templates/webhooks across tenants (tenantId omitted from update DTOs).
+- **Tenant-scoped webhook dispatch (worker)**: `tenantId` rides `MessageJobData` → processors pass it into the webhook payload; dispatcher delivers tenant events only to that tenant's hooks while global (null-tenant) hooks receive everything.
+- **Verified live end-to-end** (fresh dist builds, migration applied): two tenants (acme/globex) + scoped keys; per-tenant duplicate template names accepted, same-tenant duplicate → 409; cross-tenant template GET/send → 404; email-only key sending WhatsApp → 403; real templated email sent as acme (`sent`, `tenant_id` stamped, received); cross-tenant message status → 404; tenant deactivation → instant 401; webhook fan-out with 3 live receivers — acme's hook + global hook fired, globex's hook stayed silent. All test artifacts cleaned up (tenants/keys/templates/webhooks deleted, temp verify admin removed, test messages un-tenanted); ad-hoc API/worker processes stopped cleanly (SIGTERM handler worked). Docker compose (Postgres/Redis) left running.
+
 ---
 
 ## Next up (priority order)
 
-**Phases 1 & 2 fully closed** — incl. per-key rate limits, dashboard management UI, and WhatsApp delivered-tracking.
+**Phase 3 core (tenants, scoped keys, row-level isolation) shipped 2026-06-13.**
 
-1. Phase 3 kickoff: multi-tenant (tenants table, scoped API keys, row-level isolation on the existing `tenant_id` columns).
+1. Dashboard UI for tenants + API keys (Phase 3 endpoints are JWT-ready; pages for create/deactivate tenant, mint/revoke keys with channel + rate-limit controls).
+2. Per-tenant usage tracking & quota enforcement (message counts, monthly quota → 429).
+3. Per-tenant provider credentials (own SMTP creds / WhatsApp session) — last Phase 3 bullet.

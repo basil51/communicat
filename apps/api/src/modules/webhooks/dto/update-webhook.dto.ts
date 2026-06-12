@@ -1,4 +1,5 @@
-import { PartialType } from '@nestjs/swagger';
+import { OmitType, PartialType } from '@nestjs/swagger';
 import { CreateWebhookDto } from './create-webhook.dto';
 
-export class UpdateWebhookDto extends PartialType(CreateWebhookDto) {}
+// tenantId excluded — webhooks cannot move between tenants
+export class UpdateWebhookDto extends PartialType(OmitType(CreateWebhookDto, ['tenantId'] as const)) {}

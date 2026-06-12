@@ -37,6 +37,8 @@ export interface WebhookEventPayload {
   to: string;
   status: MessageStatus;
   errorMessage?: string;
+  // Routing + payload field: tenant webhooks only receive their own tenant's events
+  tenantId?: string | null;
   timestamp: string;
 }
 

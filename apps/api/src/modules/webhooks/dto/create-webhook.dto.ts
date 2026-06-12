@@ -1,4 +1,4 @@
-import { ArrayMinSize, IsArray, IsBoolean, IsIn, IsOptional, IsUrl } from 'class-validator';
+import { ArrayMinSize, IsArray, IsBoolean, IsIn, IsOptional, IsUUID, IsUrl } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { WebhookEvent } from '@communication/types';
 
@@ -24,4 +24,9 @@ export class CreateWebhookDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Owning tenant (JWT admins only — API keys always create under their own tenant). Tenant webhooks receive only their tenant’s events; global ones receive everything.' })
+  @IsOptional()
+  @IsUUID()
+  tenantId?: string;
 }

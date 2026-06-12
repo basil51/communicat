@@ -173,6 +173,7 @@ export class WhatsAppService implements OnModuleInit, OnModuleDestroy {
         channel: 'whatsapp',
         to: row.to,
         status: 'delivered',
+        tenantId: row.tenantId,
       });
       this.logger.log(`WhatsApp message ${row.id} delivered`);
     } catch (err: any) {

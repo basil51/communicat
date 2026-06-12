@@ -1,15 +1,17 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { v4 as uuidv4 } from 'uuid';
 import { QUEUE_NAMES, MessageJobData } from '@communication/types';
 import { Message } from '../../database/entities/message.entity';
+import { ApiKey } from '../../database/entities/api-key.entity';
 import { Template } from '../../database/entities/template.entity';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SendBulkDto } from './dto/send-bulk.dto';
 import { TemplatesService } from '../templates/templates.service';
+import { TenantScope } from '../auth/tenant-scope';
 
 const MAX_SCHEDULE_MS = 30 * 24 * 3600 * 1000;
 
@@ -52,12 +54,16 @@ export class MessagesService {
     return { delayMs: 0, scheduledAt: null };
   }
 
-  private async resolveTemplate(dto: { templateId?: string; message?: string; channel: string }): Promise<Template | null> {
+  // Scoped lookup: a tenant's key can only reach its own templates (404 otherwise)
+  private async resolveTemplate(
+    dto: { templateId?: string; message?: string; channel: string },
+    scope: TenantScope,
+  ): Promise<Template | null> {
     if (!dto.templateId) return null;
     if (dto.message) {
       throw new BadRequestException('Provide either message or templateId, not both');
     }
-    const template = await this.templatesService.findOne(dto.templateId);
+    const template = await this.templatesService.findOne(dto.templateId, scope);
     if (template.channel !== dto.channel) {
       throw new BadRequestException(
         `Template "${template.name}" is for channel "${template.channel}", not "${dto.channel}"`,
@@ -66,11 +72,22 @@ export class MessagesService {
     return template;
   }
 
-  async send(dto: SendMessageDto, apiKeyId?: string) {
+  private senderScope(apiKey?: ApiKey): TenantScope {
+    return { admin: false, tenantId: apiKey?.tenantId ?? null };
+  }
+
+  private assertChannelAllowed(apiKey: ApiKey | undefined, channel: string) {
+    if (apiKey?.allowedChannels && !apiKey.allowedChannels.includes(channel as any)) {
+      throw new ForbiddenException(`This API key may not send on channel "${channel}"`);
+    }
+  }
+
+  async send(dto: SendMessageDto, apiKey?: ApiKey) {
+    this.assertChannelAllowed(apiKey, dto.channel);
     const id = uuidv4();
     const now = new Date();
     const { delayMs, scheduledAt } = this.resolveSchedule(dto, now);
-    const template = await this.resolveTemplate(dto);
+    const template = await this.resolveTemplate(dto, this.senderScope(apiKey));
 
     let body = dto.message!;
     let subject = dto.subject ?? null;
@@ -88,7 +105,8 @@ export class MessagesService {
         subject,
         body,
         status: scheduledAt ? 'scheduled' : 'queued',
-        apiKeyId: apiKeyId ?? null,
+        apiKeyId: apiKey?.id ?? null,
+        tenantId: apiKey?.tenantId ?? null,
         templateId: dto.templateId ?? null,
         scheduledAt,
         queuedAt: scheduledAt ? null : now,
@@ -101,6 +119,7 @@ export class MessagesService {
       to: dto.to,
       message: body,
       subject: subject ?? undefined,
+      tenantId: apiKey?.tenantId ?? undefined,
     };
 
     const queue = dto.channel === 'email' ? this.emailQueue : this.whatsappQueue;
@@ -111,10 +130,11 @@ export class MessagesService {
       : { id, status: 'queued' as const };
   }
 
-  async sendBulk(dto: SendBulkDto, apiKeyId?: string) {
+  async sendBulk(dto: SendBulkDto, apiKey?: ApiKey) {
+    this.assertChannelAllowed(apiKey, dto.channel);
     const now = new Date();
     const { delayMs, scheduledAt } = this.resolveSchedule(dto, now);
-    const template = await this.resolveTemplate(dto);
+    const template = await this.resolveTemplate(dto, this.senderScope(apiKey));
 
     // Render everything before persisting anything, so one bad recipient
     // fails the whole batch instead of leaving it half-sent.
@@ -148,7 +168,8 @@ export class MessagesService {
           subject: p.subject,
           body: p.body,
           status,
-          apiKeyId: apiKeyId ?? null,
+          apiKeyId: apiKey?.id ?? null,
+          tenantId: apiKey?.tenantId ?? null,
           templateId: dto.templateId ?? null,
           batchId,
           scheduledAt,
@@ -167,6 +188,7 @@ export class MessagesService {
           to: p.to,
           message: p.body,
           subject: p.subject ?? undefined,
+          tenantId: apiKey?.tenantId ?? undefined,
         } satisfies MessageJobData,
         opts: { ...JOB_OPTS, ...(delayMs > 0 && { delay: delayMs }) },
       })),
@@ -181,11 +203,12 @@ export class MessagesService {
     };
   }
 
-  async list(query: { limit: number; offset: number; status?: string; channel?: string; batchId?: string }) {
+  async list(query: { limit: number; offset: number; status?: string; channel?: string; batchId?: string; tenantId?: string }) {
     const where: Record<string, string> = {};
     if (query.status) where.status = query.status;
     if (query.channel) where.channel = query.channel;
     if (query.batchId) where.batchId = query.batchId;
+    if (query.tenantId) where.tenantId = query.tenantId;
 
     const [items, total] = await this.messageRepo.findAndCount({
       where,
@@ -213,8 +236,11 @@ export class MessagesService {
     };
   }
 
-  async getStatus(id: string) {
-    const msg = await this.messageRepo.findOne({ where: { id } });
+  async getStatus(id: string, apiKey?: ApiKey) {
+    // A tenant's key only sees its own messages; platform keys see untenanted ones
+    const msg = await this.messageRepo.findOne({
+      where: { id, tenantId: apiKey?.tenantId ?? IsNull() },
+    });
     if (!msg) throw new NotFoundException('Message not found');
 
     return {

@@ -19,10 +19,13 @@ export class WebhookDispatcherService {
   // Fans the event out into one delivery job per subscribed webhook so each
   // endpoint gets its own retries. Never throws — a webhook problem must not
   // fail the message job that triggered it.
+  // Tenant isolation: tenant webhooks only get their own tenant's events;
+  // global webhooks (tenant_id NULL, admin-created) get everything.
   async dispatch(event: WebhookEvent, payload: Omit<WebhookEventPayload, 'timestamp'>) {
     try {
-      const hooks = (await this.webhookRepo.findBy({ isActive: true })).filter((h) =>
-        h.events.includes(event),
+      const tenantId = payload.tenantId ?? null;
+      const hooks = (await this.webhookRepo.findBy({ isActive: true })).filter(
+        (h) => h.events.includes(event) && (h.tenantId === null || h.tenantId === tenantId),
       );
       if (hooks.length === 0) return;
 

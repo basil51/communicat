@@ -7,6 +7,7 @@ import { Message } from './database/entities/message.entity';
 import { ApiKey } from './database/entities/api-key.entity';
 import { User } from './database/entities/user.entity';
 import { Template } from './database/entities/template.entity';
+import { Tenant } from './database/entities/tenant.entity';
 import { Webhook } from './database/entities/webhook.entity';
 import { AuthModule } from './modules/auth/auth.module';
 import { MessagesModule } from './modules/messages/messages.module';
@@ -15,6 +16,8 @@ import { HealthModule } from './modules/health/health.module';
 import { DlqModule } from './modules/dlq/dlq.module';
 import { TemplatesModule } from './modules/templates/templates.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
+import { TenantsModule } from './modules/tenants/tenants.module';
+import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 
 @Module({
   imports: [
@@ -25,7 +28,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
         url: config.get<string>('DATABASE_URL'),
-        entities: [Message, ApiKey, User, Template, Webhook],
+        entities: [Message, ApiKey, User, Template, Tenant, Webhook],
         // Schema is managed by migrations (pnpm db:migrate); never auto-sync
         synchronize: false,
         logging: ['error'],
@@ -51,6 +54,8 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
     DlqModule,
     TemplatesModule,
     WebhooksModule,
+    TenantsModule,
+    ApiKeysModule,
   ],
 })
 export class AppModule {}

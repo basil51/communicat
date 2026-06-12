@@ -3,12 +3,15 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { createHash } from 'crypto';
 import { ApiKey } from '../../../database/entities/api-key.entity';
+import { Tenant } from '../../../database/entities/tenant.entity';
 
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
   constructor(
     @InjectRepository(ApiKey)
     private readonly apiKeyRepo: Repository<ApiKey>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -21,6 +24,12 @@ export class ApiKeyGuard implements CanActivate {
     const apiKey = await this.apiKeyRepo.findOne({ where: { keyHash, isActive: true } });
 
     if (!apiKey) throw new UnauthorizedException('Invalid API key');
+
+    // Deactivating a tenant must cut off all of its keys at once
+    if (apiKey.tenantId) {
+      const active = await this.tenantRepo.existsBy({ id: apiKey.tenantId, isActive: true });
+      if (!active) throw new UnauthorizedException('Tenant is deactivated');
+    }
 
     this.apiKeyRepo.update(apiKey.id, { lastUsedAt: new Date() }).catch(() => {});
     request.apiKey = apiKey;

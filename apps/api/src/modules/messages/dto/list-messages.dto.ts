@@ -33,4 +33,9 @@ export class ListMessagesDto {
   @IsOptional()
   @IsUUID()
   batchId?: string;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Filter to a single tenant' })
+  @IsOptional()
+  @IsUUID()
+  tenantId?: string;
 }

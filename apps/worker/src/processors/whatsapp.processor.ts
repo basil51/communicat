@@ -22,7 +22,7 @@ export class WhatsAppProcessor extends WorkerHost {
   }
 
   async process(job: Job<MessageJobData>): Promise<void> {
-    const { messageId, to, message } = job.data;
+    const { messageId, to, message, tenantId } = job.data;
     this.logger.log(`Processing WhatsApp job ${job.id} → message ${messageId}`);
 
     await this.messageRepo.update(messageId, { status: 'processing', processingAt: new Date() });
@@ -30,7 +30,7 @@ export class WhatsAppProcessor extends WorkerHost {
     try {
       const providerMessageId = await this.whatsappService.sendMessage(to, message);
       await this.messageRepo.update(messageId, { status: 'sent', sentAt: new Date(), providerMessageId });
-      await this.webhooks.dispatch('message.sent', { messageId, channel: 'whatsapp', to, status: 'sent' });
+      await this.webhooks.dispatch('message.sent', { messageId, channel: 'whatsapp', to, status: 'sent', tenantId: tenantId ?? null });
     } catch (err: any) {
       const isLastAttempt = job.attemptsMade >= (job.opts.attempts ?? 1) - 1;
       const errorMessage = err?.message ?? String(err);
@@ -40,7 +40,7 @@ export class WhatsAppProcessor extends WorkerHost {
         ...(isLastAttempt && { failedAt: new Date(), errorMessage }),
       });
       if (isLastAttempt) {
-        await this.webhooks.dispatch('message.failed', { messageId, channel: 'whatsapp', to, status: 'failed', errorMessage });
+        await this.webhooks.dispatch('message.failed', { messageId, channel: 'whatsapp', to, status: 'failed', errorMessage, tenantId: tenantId ?? null });
       }
       throw err;
     }

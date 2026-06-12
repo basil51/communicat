@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ApiKey } from '../../database/entities/api-key.entity';
+import { Tenant } from '../../database/entities/tenant.entity';
 import { User } from '../../database/entities/user.entity';
 import { ApiKeyGuard } from './guards/api-key.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -11,7 +12,7 @@ import { AuthController } from './auth.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ApiKey, User]),
+    TypeOrmModule.forFeature([ApiKey, Tenant, User]),
     JwtModule.registerAsync({
       global: true,
       inject: [ConfigService],

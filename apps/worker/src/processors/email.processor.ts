@@ -22,7 +22,7 @@ export class EmailProcessor extends WorkerHost {
   }
 
   async process(job: Job<MessageJobData>): Promise<void> {
-    const { messageId, to, subject, message } = job.data;
+    const { messageId, to, subject, message, tenantId } = job.data;
     this.logger.log(`Processing email job ${job.id} → message ${messageId}`);
 
     await this.messageRepo.update(messageId, { status: 'processing', processingAt: new Date() });
@@ -30,7 +30,7 @@ export class EmailProcessor extends WorkerHost {
     try {
       await this.emailService.send(to, subject ?? null, message);
       await this.messageRepo.update(messageId, { status: 'sent', sentAt: new Date() });
-      await this.webhooks.dispatch('message.sent', { messageId, channel: 'email', to, status: 'sent' });
+      await this.webhooks.dispatch('message.sent', { messageId, channel: 'email', to, status: 'sent', tenantId: tenantId ?? null });
     } catch (err: any) {
       const isLastAttempt = job.attemptsMade >= (job.opts.attempts ?? 1) - 1;
       const errorMessage = err?.message ?? String(err);
@@ -40,7 +40,7 @@ export class EmailProcessor extends WorkerHost {
         ...(isLastAttempt && { failedAt: new Date(), errorMessage }),
       });
       if (isLastAttempt) {
-        await this.webhooks.dispatch('message.failed', { messageId, channel: 'email', to, status: 'failed', errorMessage });
+        await this.webhooks.dispatch('message.failed', { messageId, channel: 'email', to, status: 'failed', errorMessage, tenantId: tenantId ?? null });
       }
       throw err;
     }

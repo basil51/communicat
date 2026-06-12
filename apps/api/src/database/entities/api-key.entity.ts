@@ -1,4 +1,5 @@
 import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
+import { MessageChannel } from '@communication/types';
 
 @Entity('api_keys')
 export class ApiKey {
@@ -20,6 +21,10 @@ export class ApiKey {
   // null = use the API_KEY_RATE_LIMIT_PER_MINUTE env default
   @Column({ name: 'rate_limit_per_minute', type: 'int', nullable: true })
   rateLimitPerMinute: number | null;
+
+  // null = all channels allowed
+  @Column({ name: 'allowed_channels', type: 'simple-array', nullable: true })
+  allowedChannels: MessageChannel[] | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

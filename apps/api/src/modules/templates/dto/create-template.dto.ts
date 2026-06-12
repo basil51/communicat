@@ -1,4 +1,4 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { MessageChannel } from '@communication/types';
 
@@ -25,4 +25,9 @@ export class CreateTemplateDto {
   @IsOptional()
   @IsString()
   subject?: string;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Owning tenant (JWT admins only — API keys always create under their own tenant)' })
+  @IsOptional()
+  @IsUUID()
+  tenantId?: string;
 }

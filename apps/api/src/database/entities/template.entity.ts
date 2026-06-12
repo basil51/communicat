@@ -6,7 +6,8 @@ export class Template {
   @PrimaryColumn()
   id: string;
 
-  @Column({ unique: true })
+  // Unique per tenant — DB constraint UQ_templates_tenant_name (NULLS NOT DISTINCT)
+  @Column()
   name: string;
 
   @Column({ type: 'varchar' })
