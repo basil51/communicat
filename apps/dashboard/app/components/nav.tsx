@@ -8,6 +8,8 @@ const links = [
   { href: '/', label: 'Overview' },
   { href: '/templates', label: 'Templates' },
   { href: '/webhooks', label: 'Webhooks' },
+  { href: '/tenants', label: 'Tenants' },
+  { href: '/api-keys', label: 'API Keys' },
 ];
 
 export function Nav({ subtitle }: { subtitle: string }) {

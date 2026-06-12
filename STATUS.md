@@ -46,13 +46,13 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 | API key management (Phase 3) | `/api/v1/api-keys` CRUD (JWT-only) — keys no longer require the seed script; per-key `tenantId`, `allowedChannels` (null = all; 403 on disallowed channel), `rateLimitPerMinute`; plaintext returned exactly once on create |
 | Row-level isolation (Phase 3) | All reads/writes scoped via `TenantScope` (`tenant-scope.ts`): API keys see only their tenant's messages/templates/webhooks (404 cross-tenant), platform keys (null tenant) see only untenanted rows, JWT admins see all (+ `tenantId` filters on `GET /messages` and `/api-keys`); template names unique per tenant (`UNIQUE NULLS NOT DISTINCT`); messages stamped with `tenant_id` (indexed) |
 | Tenant-scoped webhooks (Phase 3) | Worker dispatch filters by tenant: tenant webhooks receive only their tenant's events, global (null-tenant, admin-created) webhooks receive everything; `tenantId` travels in `MessageJobData` and the webhook payload |
+| Tenants/API-keys dashboard UI (Phase 3) | `/tenants` page (create, deactivate with key-cutoff warning, reactivate, delete with 409 surfaced) + `/api-keys` page (mint with tenant dropdown / channel checkboxes / per-minute rate limit, one-time amber plaintext-key banner with Copy, pause/resume, delete, last-used column); both in shared nav |
 | Swagger | http://localhost:3001/api |
 | Env | `.env` files present at root, `apps/api`, `apps/worker` (SMTP + WhatsApp configured) |
 
 ### In progress / known gaps 🔧
 
 - **Dashboard messages table** — has pagination + status/channel filters; `batchId` and `tenantId` filters exist in the API but have no UI controls yet.
-- **No dashboard UI for tenants / API keys yet** — Phase 3 endpoints are JWT-ready but only reachable via curl/Swagger.
 - **CreateTenants migration is hand-written** — `UNIQUE NULLS NOT DISTINCT` isn't expressible in TypeORM decorators, so a future `db:migration:generate` may try to drop `UQ_templates_tenant_name`; review generated migrations before running.
 - **Phase 3 leftovers** — per-tenant usage tracking/quotas and per-tenant provider credentials (own SMTP / WhatsApp session) not started.
 - **Don't run `pnpm build` while `pnpm dev` is running** — `next build` clobbers the dev server's `.next` dir and breaks it until restart. Build only api/worker (`pnpm --filter @communication/api build`) when the stack is up.
@@ -113,13 +113,14 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 - **Row-level isolation**: new `TenantScope` helper (`modules/auth/tenant-scope.ts`) drives every templates/webhooks/messages query — API keys are confined to their tenant (cross-tenant access → 404), platform keys (tenant NULL) see only untenanted rows, JWT admins see everything with optional `tenantId` filters on `GET /messages` + `GET /api-keys`. Messages stamp `tenant_id` from the sending key; send/`send-bulk` enforce `allowedChannels` (403). PATCH can't move templates/webhooks across tenants (tenantId omitted from update DTOs).
 - **Tenant-scoped webhook dispatch (worker)**: `tenantId` rides `MessageJobData` → processors pass it into the webhook payload; dispatcher delivers tenant events only to that tenant's hooks while global (null-tenant) hooks receive everything.
 - **Verified live end-to-end** (fresh dist builds, migration applied): two tenants (acme/globex) + scoped keys; per-tenant duplicate template names accepted, same-tenant duplicate → 409; cross-tenant template GET/send → 404; email-only key sending WhatsApp → 403; real templated email sent as acme (`sent`, `tenant_id` stamped, received); cross-tenant message status → 404; tenant deactivation → instant 401; webhook fan-out with 3 live receivers — acme's hook + global hook fired, globex's hook stayed silent. All test artifacts cleaned up (tenants/keys/templates/webhooks deleted, temp verify admin removed, test messages un-tenanted); ad-hoc API/worker processes stopped cleanly (SIGTERM handler worked). Docker compose (Postgres/Redis) left running.
+- Basel pushed the Phase 3 core commit to GitHub from VSCode.
+- **Tenants + API-keys dashboard UI shipped**: `/tenants` (create, deactivate — confirm dialog warns it cuts off all the tenant's keys — reactivate, delete with the API's 409 message surfaced) and `/api-keys` (mint with name / tenant dropdown (active tenants only, default "Platform") / channel checkboxes (all checked = unrestricted) / optional rate limit; plaintext key shown once in an amber banner with Copy; pause/resume, delete, last-used column; tenant ids resolved to names in the table). Nav extended to five links. Same client-side patterns as the templates/webhooks pages — no API changes. Verified: `tsc --noEmit` clean, all five routes 200 on the running dev server, unauthenticated API check still 401s.
 
 ---
 
 ## Next up (priority order)
 
-**Phase 3 core (tenants, scoped keys, row-level isolation) shipped 2026-06-13.**
+**Phase 3 core (tenants, scoped keys, row-level isolation) + tenants/keys dashboard UI shipped 2026-06-13.**
 
-1. Dashboard UI for tenants + API keys (Phase 3 endpoints are JWT-ready; pages for create/deactivate tenant, mint/revoke keys with channel + rate-limit controls).
-2. Per-tenant usage tracking & quota enforcement (message counts, monthly quota → 429).
-3. Per-tenant provider credentials (own SMTP creds / WhatsApp session) — last Phase 3 bullet.
+1. Per-tenant usage tracking & quota enforcement (message counts, monthly quota → 429).
+2. Per-tenant provider credentials (own SMTP creds / WhatsApp session) — last Phase 3 bullet.
