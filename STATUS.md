@@ -47,7 +47,7 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 ### In progress / known gaps 🔧
 
 - **WhatsApp status bridge** — `ProvidersService.getWhatsAppStatus()` reads the `whatsapp:status` key from Redis, but the worker never writes it, so the endpoint always reports `unknown`. *(Being fixed today.)*
-- **Dashboard** — v1 + DLQ panel + WhatsApp QR done. Still missing: pagination/filters UI, template/webhook management UI.
+- **Dashboard messages table** — has pagination + status/channel filters; `batchId` filter exists in the API but has no UI control yet.
 - **Don't run `pnpm build` while `pnpm dev` is running** — `next build` clobbers the dev server's `.next` dir and breaks it until restart. Build only api/worker (`pnpm --filter @communication/api build`) when the stack is up.
 - **Duplicate Message entity** — `apps/worker/src/database/entities/message.entity.ts` is a copy of the API's; should move to `packages/shared` eventually.
 (Verified: the `messages` entity already carries the nullable `tenant_id` column required by the Phase 3 design note.)
@@ -95,12 +95,13 @@ Client → API (X-API-Key) → PostgreSQL (message row) → BullMQ queue → Wor
 
 - **Per-key rate limits shipped (last Phase 1 leftover)**: `rate_limit_per_minute` column on `api_keys` (`AddApiKeyRateLimit` migration; null → `API_KEY_RATE_LIMIT_PER_MINUTE` env default 60) enforced by `ApiKeyRateLimitGuard` — fixed 1-minute Redis window (`INCRBY`, key TTL 2×window), runs after `ApiKeyGuard` on send + send-bulk, counts *messages* (bulk costs its recipient count, clamped to 100), 429 with `Retry-After` header. Replaced the old per-IP route `@Throttle`s (global 200/min/IP backstop remains). Note: BullMQ ≥5.78 types `queue.client` as a narrow `IRedisClient` — its runtime proxy still forwards `incrby`/`expire` to ioredis, hence the local cast in the guard. Verified live with a 3/min key: 3 requests passed then 429 (`Retry-After: 9`), and a 5-recipient bulk on a fresh window 429'd immediately; test limits reset to NULL after.
 
+- **Dashboard management UI shipped**: shared nav header (Overview / Templates / Webhooks + sign out); `/templates` page (create/edit/delete with channel-aware subject field, 409-duplicate errors surfaced); `/webhooks` page (register with event checkboxes, pause/resume via `isActive` PATCH, secret hidden by default with Show/Copy, delete); messages table got status+channel filter dropdowns and Previous/Next pagination (25/page, filters reset offset). All client-side against existing JWT endpoints — no API changes. Verified: `tsc --noEmit` clean, all four routes 200 on the dev server.
+
 ---
 
 ## Next up (priority order)
 
-**Phase 2 is feature-complete** (templates, scheduled/delayed, bulk, webhooks), and per-key rate limits closed out Phase 1.
+**Phase 2 is feature-complete** (templates, scheduled/delayed, bulk, webhooks), per-key rate limits closed out Phase 1, and the dashboard now has template/webhook management + messages pagination/filters.
 
-1. Dashboard: template/webhook management UI; pagination/filters for the messages table.
-2. Decide on `delivered` tracking: Roadmap (Phase 1 lifecycle + Phase 2 webhooks) mentions a `delivered` status, but nothing implements it (WhatsApp would need message-ack listeners; SMTP can't really support it). Build for WhatsApp or drop from scope.
-3. Phase 3 kickoff: multi-tenant (tenants table, scoped API keys, row-level isolation on the existing `tenant_id` columns).
+1. Decide on `delivered` tracking: Roadmap (Phase 1 lifecycle + Phase 2 webhooks) mentions a `delivered` status, but nothing implements it (WhatsApp would need message-ack listeners; SMTP can't really support it). Build for WhatsApp or drop from scope.
+2. Phase 3 kickoff: multi-tenant (tenants table, scoped API keys, row-level isolation on the existing `tenant_id` columns).

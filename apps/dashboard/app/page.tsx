@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { QRCodeSVG } from 'qrcode.react';
 import { ApiError, apiFetch, clearToken, getToken } from './lib/api';
+import { Nav } from './components/nav';
 
 interface ProvidersStatus {
   email: { connected: boolean; error: string | null; queue: QueueCounts };
@@ -53,6 +54,10 @@ interface DlqList {
 }
 
 const REFRESH_MS = 10_000;
+const PAGE_SIZE = 25;
+
+const STATUSES = ['scheduled', 'queued', 'processing', 'sent', 'failed'] as const;
+const CHANNELS = ['email', 'whatsapp'] as const;
 
 const statusColors: Record<string, string> = {
   sent: 'bg-green-100 text-green-700',
@@ -70,12 +75,18 @@ export default function DashboardPage() {
   const [dlq, setDlq] = useState<DlqList | null>(null);
   const [whatsappQr, setWhatsappQr] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [channelFilter, setChannelFilter] = useState('');
+  const [offset, setOffset] = useState(0);
 
   const refresh = useCallback(async () => {
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
+    if (statusFilter) params.set('status', statusFilter);
+    if (channelFilter) params.set('channel', channelFilter);
     try {
       const [prov, msgs, failed, qr] = await Promise.all([
         apiFetch<ProvidersStatus>('/providers/status'),
-        apiFetch<MessageList>('/messages?limit=25'),
+        apiFetch<MessageList>(`/messages?${params}`),
         apiFetch<DlqList>('/dlq'),
         apiFetch<{ qr: string | null }>('/providers/whatsapp/qr'),
       ]);
@@ -92,7 +103,7 @@ export default function DashboardPage() {
       }
       setError(err instanceof Error ? err.message : 'Failed to load data');
     }
-  }, [router]);
+  }, [router, statusFilter, channelFilter, offset]);
 
   useEffect(() => {
     if (!getToken()) {
@@ -103,11 +114,6 @@ export default function DashboardPage() {
     const interval = setInterval(refresh, REFRESH_MS);
     return () => clearInterval(interval);
   }, [refresh, router]);
-
-  function logout() {
-    clearToken();
-    router.replace('/login');
-  }
 
   async function dlqAction(path: string) {
     try {
@@ -123,18 +129,7 @@ export default function DashboardPage() {
   return (
     <main className="min-h-screen bg-gray-50 p-6">
       <div className="mx-auto max-w-6xl">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Communication Service</h1>
-            <p className="text-sm text-gray-500">Provider status and message log</p>
-          </div>
-          <button
-            onClick={logout}
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
-          >
-            Sign out
-          </button>
-        </div>
+        <Nav subtitle="Provider status and message log" />
 
         {error && (
           <div className="mt-4 rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">
@@ -260,11 +255,43 @@ export default function DashboardPage() {
         )}
 
         <div className="mt-8 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+          <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
             <h2 className="font-semibold">Recent messages</h2>
-            <span className="text-sm text-gray-500">
-              {messages ? `${messages.total} total` : 'loading…'}
-            </span>
+            <div className="flex items-center gap-2">
+              <select
+                value={channelFilter}
+                onChange={(e) => {
+                  setChannelFilter(e.target.value);
+                  setOffset(0);
+                }}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700"
+              >
+                <option value="">All channels</option>
+                {CHANNELS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={statusFilter}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setOffset(0);
+                }}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm text-gray-700"
+              >
+                <option value="">All statuses</option>
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <span className="text-sm text-gray-500">
+                {messages ? `${messages.total} total` : 'loading…'}
+              </span>
+            </div>
           </div>
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-gray-500">
@@ -308,6 +335,29 @@ export default function DashboardPage() {
               ))}
             </tbody>
           </table>
+          {messages && messages.total > PAGE_SIZE && (
+            <div className="flex items-center justify-between border-t border-gray-200 px-4 py-2 text-sm">
+              <span className="text-gray-500">
+                {offset + 1}–{Math.min(offset + PAGE_SIZE, messages.total)} of {messages.total}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+                  disabled={offset === 0}
+                  className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:hover:bg-white"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setOffset(offset + PAGE_SIZE)}
+                  disabled={offset + PAGE_SIZE >= messages.total}
+                  className="rounded-md border border-gray-300 px-3 py-1 text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:hover:bg-white"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </main>
